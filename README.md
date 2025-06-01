@@ -99,5 +99,8 @@ Contributions to GrugV3 are welcome! If you find any issues, have suggestions fo
 1.  Open an issue on the project's repository.
 2.  Fork the repository, make your changes, and submit a pull request.
 
+### Collaborators
+- Jules
+
 ## License
 This project is licensed under the MIT License. See the [LICENSE](LICENSE.md) file for details.
