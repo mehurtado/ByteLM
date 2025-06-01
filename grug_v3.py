@@ -22,7 +22,7 @@ CONFIG_V3 = {
     "checkpoint_dir": "./checkpoints_grug_v3",
     "model_name": "grug_v3_cnn_attention",
     "resume_from_checkpoint": None, # "./checkpoints_grug_v3/grug_v3_cnn_attention_best.pth", # Path to checkpoint if resuming
-    "sequence_length": 16,
+    "sequence_length": 64,
     "batch_size": 32,
     "vocab_size": 256, # Byte-level model
     "val_split_ratio": 0.1,
