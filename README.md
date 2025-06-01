@@ -56,7 +56,6 @@ Users are encouraged to inspect and modify the `CONFIG_V3` dictionary in `grug_v
 *   Python 3.x
 *   PyTorch (`torch`)
 *   NumPy (`numpy`)
-*   (Optional) `mamba_ssm`: The script includes a try-except block for `mamba_ssm` due to potential code reuse from other projects. However, GrugV3 itself **does not** use Mamba components. Installation is not required for GrugV3 to function.
 
 You can typically install the required libraries using pip:
 ```bash
