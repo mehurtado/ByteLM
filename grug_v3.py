@@ -28,7 +28,7 @@ CONFIG_V3 = {
     "val_split_ratio": 0.1,
     "num_workers": 8,
     "generate_dummy_data_if_empty": True,
-    "force_reprocess_data": True, # Set to True to re-process data from scratch
+    "force_reprocess_data": False, # Set to True to re-process data from scratch
 
     # Embedding Layer
     "embedding_dim": 512,
