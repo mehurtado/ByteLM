@@ -100,4 +100,4 @@ Contributions to GrugV3 are welcome! If you find any issues, have suggestions fo
 2.  Fork the repository, make your changes, and submit a pull request.
 
 ## License
-[Specify License Here - e.g., MIT License]
+This project is licensed under the MIT License. See the [LICENSE](LICENSE.md) file for details.
