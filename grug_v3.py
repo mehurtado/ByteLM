@@ -21,7 +21,7 @@ CONFIG_V3 = {
     "processed_data_dir": "./dataset/USE_processed", 
     "checkpoint_dir": "./checkpoints_grug_v3",
     "model_name": "grug_v3_cnn_attention",
-    "resume_from_checkpoint": None, # "./checkpoints_grug_v3/grug_v3_cnn_attention_best.pth", # Path to checkpoint if resuming
+    "resume_from_checkpoint": "./checkpoints_grug_v3/grug_v3_cnn_attention_best.pth", # Path to checkpoint if resuming
     "sequence_length": 64,
     "batch_size": 32,
     "vocab_size": 256, # Byte-level model
@@ -58,7 +58,7 @@ CONFIG_V3 = {
 
     # Training Parameters
     "num_epochs": 50,
-    "learning_rate": 1e-4,
+    "learning_rate": 3e-5,
     "optimizer_type": "AdamW", # Options: "AdamW", "Adam"
     "adam_beta1": 0.9,
     "adam_beta2": 0.98,
@@ -80,7 +80,7 @@ CONFIG_V3 = {
     "lr_warmup_init_factor": 0.01, # Initial LR = learning_rate * lr_warmup_init_factor
 
     # Automatic Mixed Precision (AMP)
-    "use_amp": True, # Set to True to enable AMP for CUDA training
+    "use_amp": False, # Set to True to enable AMP for CUDA training
 
     # Generation / Prediction Settings
     "generation_temperature": 1.0,
@@ -487,14 +487,14 @@ class Trainer:
         self.current_config_for_checkpoint = self.train_config
         self.current_global_step = 0
         self.use_amp = self.train_config.get("use_amp", False) and self.device.type == 'cuda'
-        self.scaler = GradScaler(enabled=self.use_amp)
+        self.scaler = torch.amp.GradScaler('cuda', enabled=self.use_amp)
         if self.use_amp: print("Automatic Mixed Precision (AMP) is ENABLED for training.")
         else: print("Automatic Mixed Precision (AMP) is DISABLED for training.")
 
     def _run_profiler_step(self, profiler_context, epoch_num, batch_idx, inputs, targets):
         inputs, targets = inputs.to(self.device, non_blocking=True), targets.to(self.device, non_blocking=True)
         self.optimizer.zero_grad(set_to_none=True)
-        with autocast(enabled=self.use_amp):
+        with torch.amp.autocast('cuda', enabled=self.use_amp):
             outputs = self.model(inputs)
             loss = self.criterion(outputs, targets)
         self.scaler.scale(loss).backward()
@@ -1277,7 +1277,7 @@ CONFIG_V3 = {
 # --- Imports needed for Trainer/Predictor ---
 import torch
 import torch.optim as optim # For optim.lr_scheduler
-from torch.cuda.amp import GradScaler, autocast # For AMP in Trainer
+from torch.amp import GradScaler, autocast # For AMP in Trainer
 from pathlib import Path # For checkpoint paths
 import traceback # For error printing
 import time # For profiler
@@ -1359,7 +1359,7 @@ class Trainer:
         self.current_config_for_checkpoint = self.train_config
         self.current_global_step = 0
         self.use_amp = self.train_config.get("use_amp", False) and self.device.type == 'cuda'
-        self.scaler = GradScaler(enabled=self.use_amp)
+        self.scaler = torch.amp.GradScaler('cuda', enabled=self.use_amp)
         if self.use_amp: print("Automatic Mixed Precision (AMP) is ENABLED for training.")
         else: print("Automatic Mixed Precision (AMP) is DISABLED for training.")
 
@@ -1681,7 +1681,7 @@ class Trainer:
         self.current_config_for_checkpoint = self.train_config
         self.current_global_step = 0
         self.use_amp = self.train_config.get("use_amp", False) and self.device.type == 'cuda'
-        self.scaler = GradScaler(enabled=self.use_amp)
+        self.scaler = GradScaler('cuda', enabled=self.use_amp)
         if self.use_amp: print("Automatic Mixed Precision (AMP) is ENABLED for training.")
         else: print("Automatic Mixed Precision (AMP) is DISABLED for training.")
 
