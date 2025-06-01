@@ -58,7 +58,7 @@ CONFIG_V3 = {
 
     # Training Parameters
     "num_epochs": 50,
-    "learning_rate": 3e-5,
+    "learning_rate": 5e-5,
     "optimizer_type": "AdamW", # Options: "AdamW", "Adam"
     "adam_beta1": 0.9,
     "adam_beta2": 0.98,
@@ -80,7 +80,7 @@ CONFIG_V3 = {
     "lr_warmup_init_factor": 0.01, # Initial LR = learning_rate * lr_warmup_init_factor
 
     # Automatic Mixed Precision (AMP)
-    "use_amp": False, # Set to True to enable AMP for CUDA training
+    "use_amp": True, # Set to True to enable AMP for CUDA training
 
     # Generation / Prediction Settings
     "generation_temperature": 1.0,
