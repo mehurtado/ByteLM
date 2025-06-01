@@ -1,3 +1,59 @@
-GrugV3 Byte-Level Language ModelOverviewGrugV3 is a PyTorch-based byte-level language model for text generation and sequence modeling research. It processes raw UTF-8 byte sequences, enabling it to handle diverse text and encodings.Status: Actively under development; not yet stable. Performance may vary.Core FeaturesByte-Level Processing: Vocabulary-agnostic, operates directly on UTF-8 bytes.Modular & Configurable Architecture: Key parameters (embeddings, CNN, attention) are defined in config.py.Optional CNN Frontend: Employs 1D CNNs for initial sequence processing.Transformer Core: Utilizes multi-head self-attention and learnable positional encodings.Comprehensive Training & Prediction: Orchestrated by main.py, featuring:Checkpointing (save/resume, best model).Learning rate scheduling (Cosine Annealing, ReduceLROnPlateau) and warmup.Automatic Mixed Precision (AMP) support.Robust data processing from .txt files to a memory-mapped byte array.Optional dummy data generation for testing.Integrated PyTorch profiler support.Text generation capabilities.ArchitectureEmbedding Layer: Maps bytes to dense vectors.CNN Frontend (Optional): (model_components.py) Processes embeddings to capture local patterns.Learnable Positional Encoding: (model_components.py) Adds positional context.Multi-Head Attention Layers: (model.py) Stacked Transformer encoders for learning dependencies.Output Layer: Projects to logits over byte values (0-255) for next-byte prediction.DatasetDataProcessor (in dataset.py) reads .txt files from data_dir, concatenates, encodes to UTF-8 bytes, and saves as all_bytes_grug_v3.npy in processed_data_dir.ByteSequenceDataset (in dataset.py) serves sequences for training/validation.ConfigurationAll settings are managed via the CONFIG_V3 dictionary in config.py. This includes paths, model hyperparameters, training parameters, generation settings, and profiling options.Setup & UsagePrerequisitesPython 3.xPyTorch (torch)NumPy (numpy)pip install torch numpy
-Data PreparationPlace UTF-8 encoded .txt training files in the data_dir specified in config.py (default: ./dataset/USE).Dummy data is generated if data_dir is empty and generate_dummy_data_if_empty is True.Data is processed into all_bytes_grug_v3.npy on the first run. Set force_reprocess_data: True in config.py to rebuild.RunningExecute the main script:python3 main.py
-Control training and prediction phases via DO_TRAINING and DO_PREDICTION flags in config.py.Checkpoints are saved in checkpoint_dir (default: ./checkpoints_grug_v3), with the best model as [model_name]_best.pth.Project Structuremain.py: Main execution script; orchestrates training and prediction.config.py: Contains the CONFIG_V3 dictionary for all settings.utils.py: General utility functions (e.g., ensure_dir, generate_dummy_data).dataset.py: Houses DataProcessor and ByteSequenceDataset for data handling.model_components.py: Defines LearnablePositionalEncoding and CNNFrontend.model.py: Defines the main ByteLLM_GrugV3 model architecture.predictor.py: Contains the Predictor class for sequence generation.trainer.py: Encapsulates the Trainer class for managing the training loop.ContributingContributions are welcome. Please open an issue or submit a pull request.Collaborators: JulesLicenseMIT License. See LICENSE.md.
+# GrugV3 Byte-Level Language Model
+
+## Overview
+GrugV3 is a PyTorch-based byte-level language model for text generation and sequence modeling. It processes raw UTF-8 byte sequences, handling diverse text and encodings.
+**Status:** Actively under development; not yet stable.
+
+## Core Features
+- **Byte-Level Processing:** Operates directly on UTF-8 bytes.
+- **Modular Architecture:** Key parameters defined in `config.py`.
+- **Optional CNN Frontend:** 1D CNNs for initial sequence processing.
+- **Transformer Core:** Multi-head self-attention and learnable positional encodings.
+- **Comprehensive Tooling:** Includes checkpointing, LR scheduling, AMP, robust data handling, dummy data generation, profiler support, and text generation, all orchestrated by `main.py`.
+
+## Architecture
+- **Embedding Layer:** Maps bytes to dense vectors.
+- **CNN Frontend (Optional):** (`model_components.py`) Captures local patterns from embeddings.
+- **Learnable Positional Encoding:** (`model_components.py`) Adds positional context.
+- **Multi-Head Attention Layers:** (`model.py`) Stacked Transformer encoders.
+- **Output Layer:** Predicts next-byte logits (0-255).
+
+## Dataset and Data Preparation
+- `DataProcessor` (in `dataset.py`): Reads `.txt` files from ``data_dir``, concatenates, UTF-8 encodes, and saves as ``all_bytes_grug_v3.npy`` in ``processed_data_dir``.
+- `ByteSequenceDataset` (in `dataset.py`): Serves sequences for training/validation.
+- Place UTF-8 `.txt` training files in ``data_dir`` (default: `./dataset/USE`).
+- Dummy data is generated if ``data_dir`` is empty and ``generate_dummy_data_if_empty`` is `True` in `config.py`.
+- Data is processed to ``all_bytes_grug_v3.npy`` on first run. Set ``force_reprocess_data``: `True` in `config.py` to rebuild.
+
+## Configuration
+All settings are in the `CONFIG_V3` dictionary in `config.py` (paths, model hyperparameters, training, generation, profiling).
+
+## Setup & Usage
+**Prerequisites:**
+```bash
+pip install torch numpy
+```
+**Running:**
+1. Prepare your data as described in "Dataset and Data Preparation".
+2. Execute: `python3 main.py`
+3. Control training/prediction via `DO_TRAINING` and `DO_PREDICTION` in `config.py`.
+4. Checkpoints are in `checkpoint_dir` (default: `./checkpoints_grug_v3`); best model: `[model_name]_best.pth`.
+
+## Project Structure
+- `main.py`: Main script for training and prediction.
+- `config.py`: `CONFIG_V3` dictionary for all settings.
+- `utils.py`: Utility functions.
+- `dataset.py`: `DataProcessor` and `ByteSequenceDataset`.
+- `model_components.py`: `LearnablePositionalEncoding`, `CNNFrontend`.
+- `model.py`: `ByteLLM_GrugV3` model architecture.
+- `predictor.py`: `Predictor` class for generation.
+- `trainer.py`: `Trainer` class for training loop.
+
+## Contributing
+Contributions welcome via issues or pull requests.
+
+## Collaborators
+- Jules
+
+## License
+MIT License. See `LICENSE.md`.
