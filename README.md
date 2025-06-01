@@ -71,7 +71,7 @@ pip install torch numpy
 ### Running the Script
 Execute the main script from your terminal:
 ```bash
-python grug_v3.py
+python3 grug_v3.py
 ```
 
 ### Training
