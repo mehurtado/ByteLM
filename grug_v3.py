@@ -21,8 +21,8 @@ CONFIG_V3 = {
     "processed_data_dir": "./dataset/USE_processed", 
     "checkpoint_dir": "./checkpoints_grug_v3",
     "model_name": "grug_v3_cnn_attention",
-    "resume_from_checkpoint": "./checkpoints_grug_v3/grug_v3_cnn_attention_best.pth", # Path to checkpoint if resuming
-    "sequence_length": 32,
+    "resume_from_checkpoint": None, # "./checkpoints_grug_v3/grug_v3_cnn_attention_best.pth", # Path to checkpoint if resuming
+    "sequence_length": 16,
     "batch_size": 32,
     "vocab_size": 256, # Byte-level model
     "val_split_ratio": 0.1,
@@ -58,7 +58,7 @@ CONFIG_V3 = {
 
     # Training Parameters
     "num_epochs": 50,
-    "learning_rate": 5e-5,
+    "learning_rate": 1e-4,
     "optimizer_type": "AdamW", # Options: "AdamW", "Adam"
     "adam_beta1": 0.9,
     "adam_beta2": 0.98,
@@ -70,8 +70,8 @@ CONFIG_V3 = {
     "lr_scheduler_patience": 10,     # Patience for ReduceLROnPlateau
     "lr_scheduler_factor": 0.1,      # Factor for ReduceLROnPlateau
     "clip_grad_norm_value": 1.0,     # Max norm for gradient clipping
-    "print_every": 100,              # Print training stats every N batches
-    "test_every_batches": 500,       # Run interim test every N batches (0 to disable)
+    "print_every": 1000,              # Print training stats every N batches
+    "test_every_batches": 5000,       # Run interim test every N batches (0 to disable)
     "reset_best_val_loss_on_resume": True, # If True, best_val_loss is reset when resuming
 
     # Learning Rate Warmup
