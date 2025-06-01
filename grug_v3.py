@@ -2272,9 +2272,7 @@ def perform_prediction_scenarios(current_run_config, device):
 def main():
     global CONFIG_V3 # Allow CONFIG_V3 to be modified (e.g., vocab_size update)
 
-    # MAMBA_AVAILABLE check removed as GrugV3 doesn't depend on Mamba.
-    # The MAMBA_AVAILABLE flag might still exist in the file from previous copy-pastes,
-    # but it's not used by the core GrugV3 model logic.
+    torch.autograd.set_detect_anomaly(True)
 
     # For performance profiling, disable anomaly detection if it's on and profiler is active
     if CONFIG_V3.get("enable_profiler", False) and torch.is_anomaly_enabled():
