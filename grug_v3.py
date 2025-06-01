@@ -250,7 +250,7 @@ CONFIG_V3 = {
     "attention_d_model": 512, # Placeholder, will be determined by preceding layer's output dim.
     "attention_num_heads": 8,       # e.g., 8. Must be a divisor of attention_d_model.
     "attention_dropout": 0.1,     # Dropout for attention layers
-    "num_attention_layers": 4,      # Number of stacked attention layers (like num_mamba_layers)
+    "num_attention_layers": 4,      # Number of stacked attention layers
 
     # Output Layer (Copied from GrugV2)
     "output_dropout": 0.2,
@@ -1062,7 +1062,7 @@ class ByteLLM_GrugV3(nn.Module):
 
         print(f"ByteLLM_GrugV3 Initialized. Embedding Dim: {embedding_dim}, CNN Out (if used): {current_dim_after_cnn if self.cnn_frontend else 'N/A'}, PE/Attention Dim: {model_config['attention_d_model']}, Vocab Size: {vocab_size}")
 
-    def forward(self, x: torch.Tensor, inference_params=None): # Added inference_params
+    def forward(self, x: torch.Tensor): # Removed unused inference_params
         # x shape: (batch_size, seq_len)
         x = self.embedding(x)  # (batch_size, seq_len, embedding_dim)
 
@@ -1087,39 +1087,281 @@ class ByteLLM_GrugV3(nn.Module):
 
         return logits
 
-# --- Main execution (placeholder for basic testing) ---
-if __name__ == '__main__':
-    print("GrugV3 Model Definition File")
-    
-    # Example: Instantiate the model with the defined CONFIG_V3
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    print(f"Using device: {device}")
+# --- Helper Functions for Main Execution (Copied and Adapted from GrugV2) ---
+def setup_environment(config_dict):
+    ensure_dir(config_dict["data_dir"])
+    ensure_dir(config_dict["checkpoint_dir"])
+    ensure_dir(config_dict["processed_data_dir"])
+    if config_dict.get("profiler_log_dir") and config_dict.get("enable_profiler"):
+        ensure_dir(config_dict["profiler_log_dir"])
+        ensure_dir(Path(config_dict["profiler_log_dir"]) / "train") # For train traces
+        ensure_dir(Path(config_dict["profiler_log_dir"]) / "eval") # For eval traces
 
-    # Create a dummy config, ensuring attention_d_model is consistent with CNN output
-    test_config = CONFIG_V3.copy()
-    if test_config["use_cnn_frontend"]:
-        test_config["attention_d_model"] = test_config["cnn_out_channels_list"][-1]
+    # generate_dummy_data in grug_v3.py expects config_dict as the second argument
+    if config_dict.get("generate_dummy_data_if_empty", True):
+        generate_dummy_data(config_dict["data_dir"], config_dict) # Pass config_dict
+    
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    print(f"Device: {device}")
+    if device.type == 'cuda':
+        print(f"CUDA Device Name: {torch.cuda.get_device_name(0)}")
+        print(f"CUDA Capability: {torch.cuda.get_device_capability(0)}")
+        if config_dict.get("cudnn_benchmark", False):
+            torch.backends.cudnn.benchmark = True
+            print("torch.backends.cudnn.benchmark = True (May speed up training if input sizes are constant)")
+
+    print(f"Model name for checkpoints: {config_dict['model_name']}")
+    return device
+
+def load_data_components(config_dict):
+    current_seq_len = config_dict["sequence_length"]
+    print(f"Initializing DataProcessor with sequence_length: {current_seq_len}")
+
+    # Use DataProcessor from grug_v3.py and pass CONFIG_V3 as config_for_data_gen
+    data_processor = DataProcessor(
+        config_dict["data_dir"],
+        config_dict["processed_data_dir"],
+        current_seq_len,
+        force_reprocess=config_dict.get("force_reprocess_data", False),
+        config_for_data_gen=config_dict # Pass the main config here
+    )
+    train_dataloader, val_dataloader = data_processor.get_dataloaders(
+        config_dict["batch_size"],
+        config_dict["val_split_ratio"],
+        config_dict.get("num_workers", 0),
+        current_seq_len # Pass current_sequence_length
+    )
+
+    vocab_size = data_processor.get_vocab_size() # Should be 256 for bytes
+    if config_dict.get("vocab_size") != vocab_size:
+        print(f"Warning: CONFIG_V3 vocab_size {config_dict.get('vocab_size')} differs from DataProcessor's {vocab_size}. Using DataProcessor's.")
+        config_dict["vocab_size"] = vocab_size # Update config to match actual
+    return train_dataloader, val_dataloader
+
+def initialize_optimizer(model, optim_config):
+    lr = optim_config.get("learning_rate", 1e-3)
+    optimizer_type = optim_config.get("optimizer_type", "AdamW").lower()
+
+    trainable_params = filter(lambda p: p.requires_grad, model.parameters())
+
+    if optimizer_type == "adamw":
+        return optim.AdamW(
+            trainable_params,
+            lr=lr,
+            betas=(optim_config.get("adam_beta1", 0.9), optim_config.get("adam_beta2", 0.98)),
+            eps=optim_config.get("adam_eps", 1e-9),
+            weight_decay=optim_config.get("weight_decay", 0.01)
+        )
+    elif optimizer_type == "adam":
+        return optim.Adam(
+            trainable_params,
+            lr=lr,
+            betas=(optim_config.get("adam_beta1", 0.9), optim_config.get("adam_beta2", 0.999)),
+            eps=optim_config.get("adam_eps", 1e-8)
+        )
     else:
-        test_config["attention_d_model"] = test_config["embedding_dim"]
+        raise ValueError(f"Unsupported optimizer_type: {optimizer_type}")
+
+def initialize_scheduler(optimizer, scheduler_config, batches_per_epoch=None):
+    scheduler_type = scheduler_config.get("scheduler_type")
+    if not scheduler_type: return None
+
+    if scheduler_type.lower() == "reducelronplateau":
+        return optim.lr_scheduler.ReduceLROnPlateau(
+            optimizer, mode='min',
+            factor=scheduler_config.get("lr_scheduler_factor", 0.1),
+            patience=scheduler_config.get("lr_scheduler_patience", 10)
+        )
+    elif scheduler_type.lower() == "cosineannealinglr":
+        T_max_config_key_main = "lr_scheduler_T_max_calculated_in_main"
+        T_max_config_key_direct = "lr_scheduler_T_max"
+
+        if T_max_config_key_direct in scheduler_config and scheduler_config[T_max_config_key_direct] is not None:
+            T_max = scheduler_config[T_max_config_key_direct]
+            print(f"Using T_max from config: {T_max}")
+        elif T_max_config_key_main in scheduler_config and scheduler_config[T_max_config_key_main] is not None:
+             T_max = scheduler_config[T_max_config_key_main]
+             print(f"Using T_max calculated in main: {T_max}")
+        elif batches_per_epoch is not None and batches_per_epoch > 0:
+            num_epochs_for_scheduler = scheduler_config.get("num_epochs", 50)
+            T_max = num_epochs_for_scheduler * batches_per_epoch
+            print(f"Calculated T_max for CosineAnnealingLR: {T_max} (Epochs: {num_epochs_for_scheduler}, Batches/Epoch: {batches_per_epoch})")
+        else:
+            num_epochs_for_scheduler = scheduler_config.get("num_epochs", 50)
+            fallback_batches_per_epoch = 1000
+            T_max = num_epochs_for_scheduler * fallback_batches_per_epoch
+            print(f"Warning: batches_per_epoch not available for CosineAnnealingLR T_max. Using fallback T_max: {T_max}")
+
+        return optim.lr_scheduler.CosineAnnealingLR(
+            optimizer,
+            T_max=int(T_max),
+            eta_min=scheduler_config.get("lr_scheduler_eta_min", 0)
+        )
+    else:
+        print(f"Unsupported scheduler_type: {scheduler_type}. No scheduler will be used.")
+        return None
+
+def initialize_training_components(config_dict_for_model, config_dict_for_optim_sched, device, batches_per_epoch_for_scheduler=None):
+    # Instantiate ByteLLM_GrugV3
+    model = ByteLLM_GrugV3(config_dict_for_model).to(device)
+
+    if hasattr(torch, 'compile'):
+        print("Attempting to compile the GrugV3 model with torch.compile()...")
+        # model = torch.compile(model) # Default mode
+        # Remove Mamba-specific compile modes if any were there. Default torch.compile is generic.
+
+    optimizer = initialize_optimizer(model, config_dict_for_optim_sched)
+    scheduler = initialize_scheduler(optimizer, config_dict_for_optim_sched, batches_per_epoch_for_scheduler)
+
+    criterion = nn.CrossEntropyLoss()
+    return model, optimizer, criterion, scheduler
+
+def perform_training(current_run_config, model, train_dataloader, val_dataloader, optimizer, criterion, scheduler, device):
+    if not current_run_config.get("DO_TRAINING", True):
+        print("\n--- Skipping Training Phase (DO_TRAINING set to False) ---")
+        return
+
+    print("\n--- GrugV3 Training Phase ---")
+    # Ensure Trainer uses CONFIG_V3 by default if train_config is not passed
+    # The Trainer class in grug_v3.py already has `train_config if train_config else CONFIG_V3`
+    trainer = Trainer(
+        model, train_dataloader, val_dataloader, optimizer, criterion, device,
+        current_run_config["checkpoint_dir"], current_run_config["model_name"], scheduler,
+        train_config=current_run_config
+    )
+    try:
+        trainer.train(current_run_config["num_epochs"])
+    except Exception as e:
+        print(f"An error occurred during GrugV3 training: {e}")
+        traceback.print_exc()
+
+def perform_prediction_scenarios(current_run_config, device):
+    if not current_run_config.get("DO_PREDICTION", True):
+        print("\n--- Skipping Prediction Phase (DO_PREDICTION set to False) ---")
+        return
+
+    print("\n--- GrugV3 Prediction/Generation (using best model) ---")
+    best_ckpt_path = Path(current_run_config["checkpoint_dir"]) / f"{current_run_config['model_name']}_best.pth"
+
+    if not best_ckpt_path.exists():
+        print(f"No best model checkpoint ({best_ckpt_path}) found for model '{current_run_config['model_name']}'. Skipping prediction.")
+        return
 
     try:
-        model_v3 = ByteLLM_GrugV3(test_config).to(device)
-        print("ByteLLM_GrugV3 model instantiated successfully.")
+        print(f"Loading best GrugV3 model for prediction: {best_ckpt_path}")
+        ckpt = torch.load(best_ckpt_path, map_location=device)
 
-        # Create a dummy input tensor
-        batch_size = 4
-        seq_len = test_config["sequence_length"] # Use configured sequence length
-        dummy_input = torch.randint(0, test_config["vocab_size"], (batch_size, seq_len), device=device)
-        print(f"Dummy input shape: {dummy_input.shape}")
+        loaded_model_config_from_ckpt = ckpt.get('config')
+        if not loaded_model_config_from_ckpt:
+            print("ERROR: Checkpoint does not contain its configuration. Cannot reliably perform prediction.")
+            print("Falling back to current run's config (HIGHLY RISKY).")
+            loaded_model_config_from_ckpt = current_run_config
 
-        # Perform a forward pass
-        with torch.no_grad():
-            logits = model_v3(dummy_input)
-        print(f"Output logits shape: {logits.shape}")
-        assert logits.shape == (batch_size, test_config["vocab_size"])
-        print("Forward pass successful.")
+        # Instantiate ByteLLM_GrugV3 for prediction
+        predictor_model = ByteLLM_GrugV3(loaded_model_config_from_ckpt).to(device)
+        predictor_model.load_state_dict(ckpt['model_state_dict'])
+        print("Best GrugV3 model weights loaded successfully for prediction.")
+
+        # Generation parameters from checkpoint config first, then current_run_config
+        generation_params_for_predictor = {
+            "generation_temperature": loaded_model_config_from_ckpt.get("generation_temperature", current_run_config.get("generation_temperature", 1.0)),
+            "generation_top_k": loaded_model_config_from_ckpt.get("generation_top_k", current_run_config.get("generation_top_k", 0))
+        }
+        # Model internal parameters (max_len, sequence_length for context) from checkpoint's config
+        model_internals_for_predictor = {
+            "max_positional_encoding_len": loaded_model_config_from_ckpt.get("max_positional_encoding_len", current_run_config.get("max_positional_encoding_len")), # Fallback if missing in old ckpt
+            "sequence_length": loaded_model_config_from_ckpt.get("sequence_length", current_run_config.get("sequence_length")), # Fallback
+        }
+
+        # Use Predictor from grug_v3.py
+        predictor = Predictor(predictor_model, device, generation_params_for_predictor, model_internals_for_predictor)
+
+        seeds_to_try = {
+            "Philosophical": "The meaning of life is",
+            "Technical": "Multihead attention mechanism is",
+            "Narrative Start": "Once upon a time, in a land of bytes,",
+            "Code Snippet": "import torch\nclass MySimpleModel(torch.nn.Module):"
+        }
+
+        for seed_name, seed_text in seeds_to_try.items():
+            seed_bytes = seed_text.encode('utf-8')
+            print(f"\nSeed ({seed_name}): '{seed_text}' (Length: {len(seed_bytes)} bytes)")
+            # Predictor in grug_v3.py does not use Mamba's InferenceParams
+            generated_bytes = predictor.generate_sequence(seed_bytes, length=150)
+            try:
+                full_text = generated_bytes.decode('utf-8', errors='replace')
+                print(f"Full Text (Seed + Generated):\n---\n{full_text}\n---")
+            except UnicodeDecodeError as ude:
+                print(f"Could not decode generated sequence: {ude}. Raw bytes: {generated_bytes}")
 
     except Exception as e:
-        print(f"Error during GrugV3 model test: {e}")
-        import traceback
+        print(f"An error occurred during the GrugV3 prediction phase: {e}")
         traceback.print_exc()
+
+# --- Main Orchestration ---
+def main():
+    global CONFIG_V3 # Allow CONFIG_V3 to be modified (e.g., vocab_size update)
+
+    # MAMBA_AVAILABLE check removed as GrugV3 doesn't depend on Mamba.
+    # The MAMBA_AVAILABLE flag might still exist in the file from previous copy-pastes,
+    # but it's not used by the core GrugV3 model logic.
+
+    # For performance profiling, disable anomaly detection if it's on and profiler is active
+    if CONFIG_V3.get("enable_profiler", False) and torch.is_anomaly_enabled():
+        print("INFO: Disabling autograd anomaly detection for profiling run for accurate performance metrics.")
+        # torch.set_anomaly_enabled(False) # PyTorch 2.x way (preferred if available)
+        torch.autograd.set_detect_anomaly(False) # Older way, still works
+
+    try:
+        device = setup_environment(CONFIG_V3)
+
+        print("\n--- GrugV3 Data Loading and Processing ---")
+        train_dataloader, val_dataloader = load_data_components(CONFIG_V3)
+
+        # Calculate batches_per_epoch for scheduler T_max if needed
+        batches_per_epoch = None
+        if train_dataloader and len(train_dataloader) > 0:
+            batches_per_epoch = len(train_dataloader)
+            # Update T_max in CONFIG_V3 if CosineAnnealingLR is used and T_max is not explicitly set
+            if CONFIG_V3.get("scheduler_type", "").lower() == "cosineannealinglr" and "lr_scheduler_T_max" not in CONFIG_V3:
+                calculated_T_max = CONFIG_V3["num_epochs"] * batches_per_epoch
+                CONFIG_V3["lr_scheduler_T_max_calculated_in_main"] = calculated_T_max
+                print(f"Calculated T_max for CosineAnnealingLR in main: {calculated_T_max} (Epochs: {CONFIG_V3['num_epochs']}, Batches/Epoch: {batches_per_epoch})")
+        else: # train_dataloader is empty or None
+            if CONFIG_V3.get("scheduler_type", "").lower() == "cosineannealinglr" and "lr_scheduler_T_max" not in CONFIG_V3:
+                print("Warning: train_dataloader is empty. CosineAnnealingLR T_max might be misconfigured if not explicitly set in CONFIG_V3. Scheduler init will use a fallback.")
+
+        print("\n--- GrugV3 Model and Optimizer Initialization ---")
+        model, optimizer, criterion, scheduler = initialize_training_components(
+            CONFIG_V3, # Model uses current CONFIG_V3
+            CONFIG_V3, # Optimizer/Scheduler use current CONFIG_V3 for their params
+            device,
+            batches_per_epoch_for_scheduler=batches_per_epoch
+        )
+
+        perform_training(CONFIG_V3, model, train_dataloader, val_dataloader, optimizer, criterion, scheduler, device)
+
+        perform_prediction_scenarios(CONFIG_V3, device)
+
+    except ValueError as ve:
+        print(f"Configuration or Value Error in GrugV3 main: {ve}")
+        traceback.print_exc()
+    except FileNotFoundError as fnfe:
+        print(f"File Not Found Error in GrugV3 main: {fnfe}")
+        traceback.print_exc()
+    except ImportError as ie: # Keep this for general import errors
+        print(f"Import Error in GrugV3 main: {ie}")
+        traceback.print_exc()
+    except RuntimeError as rte: # Catch PyTorch runtime errors, often CUDA related
+        print(f"PyTorch Runtime Error in GrugV3 main: {rte}")
+        if "CUDA out of memory" in str(rte):
+            print("Hint: This is a CUDA Out of Memory error. Try reducing batch_size, sequence_length, or model dimensions (embedding_dim, cnn_out_channels_list, attention_d_model). Using AMP (use_amp=True) might also help reduce memory.")
+        traceback.print_exc()
+    except Exception as e:
+        print(f"An unexpected critical error occurred in GrugV3 main execution: {e}")
+        traceback.print_exc()
+    finally:
+        print("\nGrugV3 script finished.")
+
+if __name__ == "__main__":
+    main()
