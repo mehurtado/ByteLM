@@ -1,7 +1,7 @@
 # GrugV3 Byte-Level Language Model
 
 ## Overview
-GrugV3 is a PyTorch-based byte-level language model for text generation and sequence modeling. It processes raw UTF-8 byte sequences, handling diverse text and encodings.
+GrugV3 is a PyTorch-based byte-level language model for text generation and sequence modeling. It processes raw UTF-8 byte sequences, handling diverse inputs.
 **Status:** Actively under development; not yet stable.
 
 ## Core Features
