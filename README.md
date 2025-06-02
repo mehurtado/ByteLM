@@ -28,11 +28,6 @@ GrugV3 is a PyTorch-based byte-level language model for text generation and sequ
 ## Configuration
 All settings are in the `CONFIG_V3` dictionary in `config.py` (paths, model hyperparameters, training, generation, profiling).
 
-## Setup & Usage
-**Prerequisites:**
-```bash
-pip install torch numpy
-```
 **Running:**
 1. Prepare your data as described in "Dataset and Data Preparation".
 2. Execute: `python3 main.py`
