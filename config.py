@@ -60,6 +60,8 @@ CONFIG_V3 = {
     "clip_grad_norm_value": 1.0,
     "print_every": 1000,
     "test_every_batches": 5000,
+    "checkpoint_every_batches": 0, # Save checkpoint every N batches. 0 or -1 to disable.
+    "validate_every_batches": 0, # Run validation every N batches. 0 or -1 to disable, runs at epoch end only.
     "reset_best_val_loss_on_resume": True,
 
     # Learning Rate Warmup
