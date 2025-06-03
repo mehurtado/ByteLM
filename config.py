@@ -52,6 +52,8 @@ CONFIG_V3 = {
     "adam_beta2": 0.98,
     "adam_eps": 1e-9,
     "weight_decay": 0.01,
+    # Type of LR scheduler. Options: "CosineAnnealingLR", "ReduceLROnPlateau".
+    # To use ReduceLROnPlateau, set this to "ReduceLROnPlateau".
     "scheduler_type": "CosineAnnealingLR",
     "lr_scheduler_T_max": 50 * 1000, # Placeholder, might be recalculated in main
     "lr_scheduler_eta_min": 1e-6,
@@ -61,7 +63,9 @@ CONFIG_V3 = {
     "print_every": 1000,
     "test_every_batches": 5000,
     "checkpoint_every_batches": 0, # Save checkpoint every N batches. 0 or -1 to disable.
-    "validate_every_batches": 0, # Run validation every N batches. 0 or -1 to disable, runs at epoch end only.
+    "validate_every_batches": 0, # Run validation every N batches. 0 or -1 to disable (runs at epoch end only).
+                                 # If using "ReduceLROnPlateau" scheduler, setting this to a positive value (e.g., 1)
+                                 # allows the LR to be adjusted based on validation loss calculated at this frequency.
     "reset_best_val_loss_on_resume": True,
 
     # Learning Rate Warmup
