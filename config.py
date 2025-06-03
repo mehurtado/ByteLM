@@ -52,7 +52,7 @@ CONFIG_V3 = {
     "adam_beta2": 0.98,
     "adam_eps": 1e-9,
     "weight_decay": 0.01,
-    "scheduler_type": "CosineAnnealingLR",
+    "scheduler_type": "ReduceLROnPlateau",
     "lr_scheduler_T_max": 50 * 1000, # Placeholder, might be recalculated in main
     "lr_scheduler_eta_min": 1e-6,
     "lr_scheduler_patience": 10, # For ReduceLROnPlateau
