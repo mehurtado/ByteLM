@@ -157,6 +157,13 @@ class Trainer:
 
         for batch_idx, (inputs, targets) in enumerate(self.train_dataloader):
             self._perform_lr_warmup() 
+
+            # Step the scheduler per batch if it's not ReduceLROnPlateau and warmup is done
+            is_after_warmup = not self.train_config.get("use_lr_warmup", False) or \
+                              self.current_global_step >= self.train_config.get("lr_warmup_steps", 0)
+
+            if self.scheduler and not isinstance(self.scheduler, torch.optim.lr_scheduler.ReduceLROnPlateau) and is_after_warmup:
+                self.scheduler.step()
             
             loss_item = self._run_training_step(inputs, targets)
             epoch_loss += loss_item
