@@ -282,6 +282,56 @@ class TestTrainer(unittest.TestCase):
         mock_save_checkpoint.assert_any_call(epoch=0, val_loss=0.5, is_best=False, custom_filename=f"{self.model_name}_epoch_1.pth")
         self.assertEqual(mock_save_checkpoint.call_count, 2)
 
+    @patch('trainer.Trainer._run_training_step')
+    def test_lr_scheduler_step_per_batch_after_warmup(self, mock_run_training_step_patch):
+        config_update = {
+            "use_lr_warmup": True,
+            "lr_warmup_steps": 2, # Warmup for global_step 0 and 1
+            "learning_rate": 0.1, # Target LR for warmup and initial for scheduler
+            "lr_warmup_init_factor": 0.1, # Warmup starts at 0.1 * 0.1 = 0.01
+            "simulated_num_batches": 10,
+            "num_epochs": 1,
+            "print_every": 1,
+        }
+        self._reinitialize_trainer(config_update)
+
+        # Ensure the optimizer used by the trainer has the correct initial LR for the scheduler
+        # self.trainer.optimizer is self.mock_optimizer as per _reinitialize_trainer structure
+        self.trainer.optimizer.param_groups[0]['lr'] = config_update['learning_rate']
+
+        scheduler = torch.optim.lr_scheduler.StepLR(
+            self.trainer.optimizer,
+            step_size=3,
+            gamma=0.1
+        )
+        self.trainer.scheduler = scheduler
+
+        lrs_over_time = []
+
+        mock_run_training_step_patch.side_effect = lambda inputs, targets: (lrs_over_time.append(self.trainer.optimizer.param_groups[0]['lr']), 0.1)[1]
+
+        self.trainer.train_epoch(epoch_num=0)
+
+        expected_lrs = [
+            0.01,
+            0.055,
+            0.1,
+            0.1,
+            0.1,
+            0.01,
+            0.01,
+            0.01,
+            0.001,
+            0.001
+        ]
+
+        # print(f"Collected LRs for test_lr_scheduler_step_per_batch_after_warmup: {lrs_over_time}") # Optional debug line
+
+        self.assertEqual(len(lrs_over_time), len(expected_lrs), f"Mismatch in number of LR samples. Got {len(lrs_over_time)}, expected {len(expected_lrs)}. All LRs: {lrs_over_time}")
+        for i in range(len(expected_lrs)):
+            self.assertAlmostEqual(lrs_over_time[i], expected_lrs[i], places=5,
+                                 msg=f"LR mismatch at step {i} (global_step={i}). Got {lrs_over_time[i]}, expected {expected_lrs[i]}. All LRs: {lrs_over_time}")
+
 
 if __name__ == '__main__':
     unittest.main()
