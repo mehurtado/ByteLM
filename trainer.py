@@ -165,18 +165,8 @@ class Trainer:
                 profiler_context.step() 
 
             self.current_global_step += 1 
-
-            checkpoint_batch_freq = self.train_config.get("checkpoint_every_batches", 0)
-            if checkpoint_batch_freq > 0 and (self.current_global_step % checkpoint_batch_freq == 0):
-                custom_ckpt_filename = f"{self.model_name}_epoch_{epoch_num+1}_batch_{batch_idx+1}_step_{self.current_global_step}.pth"
-                self.save_checkpoint(
-                    epoch=epoch_num,
-                    val_loss=loss_item,  
-                    is_best=False,
-                    custom_filename=custom_ckpt_filename
-                )
             
-            validate_batch_freq = self.train_config.get("validate_every_batches", 0)
+            validate_batch_freq = self.train_config.get("validate_and_checkpoint_best_every_batches", 0)
             if validate_batch_freq > 0 and \
                (self.current_global_step % validate_batch_freq == 0) and \
                self.val_dataloader and len(self.val_dataloader) > 0:
@@ -267,8 +257,9 @@ class Trainer:
                 if self.train_config.get("reset_best_val_loss_on_resume", False):
                     self.best_val_loss = float('inf') # Reset self.best_val_loss
                     print("Best validation loss reset on resume.")
-                elif loaded_info.get('loss') is not None:
-                    self.best_val_loss = loaded_info['loss'] # Update self.best_val_loss
+                elif loaded_info.get('loss') is not None: # Fallback for older checkpoints or if best_val_loss key is missing
+                    # Prefer 'best_val_loss' if present in checkpoint, else 'loss'
+                    self.best_val_loss = loaded_info.get('best_val_loss', loaded_info.get('loss', float('inf')))
                 
                 if self.use_amp and 'scaler_state_dict' in loaded_info and loaded_info['scaler_state_dict']:
                     try:
@@ -292,7 +283,6 @@ class Trainer:
                                           epoch == self.train_config.get("profile_epoch_target", 0))
 
             if profiler_active_this_epoch:
-                # ... (profiler setup code remains the same)
                 prof_log_dir = Path(self.train_config.get("profiler_log_dir", "./profiler_logs_grug_v3"))
                 p_wait = self.train_config.get("profiler_schedule_wait", 1)
                 p_warmup = self.train_config.get("profiler_schedule_warmup", 1)
@@ -308,7 +298,7 @@ class Trainer:
                 )
                 
                 eval_active_steps = min(p_active, len(self.val_dataloader) if self.val_dataloader else 1)
-                eval_schedule = torch.profiler.schedule(wait=0, warmup=0, active=eval_active_steps, repeat=1)
+                eval_schedule = torch.profiler.schedule(wait=0, warmup=0, active=eval_active_steps, repeat=1) # Corrected eval schedule
                 eval_prof = torch.profiler.profile(
                     activities=[torch.profiler.ProfilerActivity.CPU, torch.profiler.ProfilerActivity.CUDA] if self.device.type == 'cuda' else [torch.profiler.ProfilerActivity.CPU],
                     schedule=eval_schedule,
@@ -339,8 +329,8 @@ class Trainer:
 
             self.model.train() 
 
-            if current_val_loss < self.best_val_loss: # Use self.best_val_loss
-                self.best_val_loss = current_val_loss # Update self.best_val_loss
+            if current_val_loss < self.best_val_loss: 
+                self.best_val_loss = current_val_loss 
                 print(f"New best GrugV3 validation loss at end of epoch: {self.best_val_loss:.4f}. Saving best model...")
                 self.save_checkpoint(epoch, self.best_val_loss, is_best=True)
             
@@ -359,9 +349,8 @@ class Trainer:
             'config': self.model.config, 
             'train_config': self.train_config, 
             'current_global_step': self.current_global_step,
-            'best_val_loss': self.best_val_loss # Save best_val_loss in checkpoint
+            'best_val_loss': self.best_val_loss 
         }
-        # ... (rest of save_checkpoint remains the same)
         if self.scheduler:
             checkpoint['scheduler_state_dict'] = self.scheduler.state_dict()
         if self.use_amp: 
@@ -393,7 +382,6 @@ class Trainer:
             print(f"Loading GrugV3 checkpoint from: {load_path}")
             checkpoint = torch.load(load_path, map_location=self.device)
 
-            # ... (config integrity checks remain the same)
             loaded_model_cfg = checkpoint.get('config')
             if not loaded_model_cfg:
                 print("Warning: Checkpoint does not contain model 'config'. Model architecture might be incompatible.")
@@ -418,25 +406,21 @@ class Trainer:
                 except Exception as e: 
                     print(f"Warning: Could not load scheduler state: {e}")
             
-            # Load best_val_loss from checkpoint if not resetting
-            if not self.train_config.get("reset_best_val_loss_on_resume", False) and 'best_val_loss' in checkpoint:
-                self.best_val_loss = checkpoint['best_val_loss']
-                print(f"Best validation loss loaded from checkpoint: {self.best_val_loss:.4f}")
-            elif not self.train_config.get("reset_best_val_loss_on_resume", False) and 'loss' in checkpoint:
-                # Fallback for older checkpoints that might only have 'loss'
-                self.best_val_loss = checkpoint['loss']
-                print(f"Best validation loss (from 'loss' field) loaded from checkpoint: {self.best_val_loss:.4f}")
+            if not self.train_config.get("reset_best_val_loss_on_resume", False):
+                # Prefer 'best_val_loss' from checkpoint, then 'loss', then float('inf')
+                self.best_val_loss = checkpoint.get('best_val_loss', checkpoint.get('loss', float('inf')))
+                print(f"Best validation loss loaded/set from checkpoint: {self.best_val_loss:.4f}")
 
 
             print(f"GrugV3 Checkpoint loaded successfully from {load_path}.")
             return {
                 'epoch': checkpoint.get('epoch', -1), 
-                'loss': checkpoint.get('loss', float('inf')), # This is the checkpoint's val_loss, not necessarily the best_val_loss
+                'loss': checkpoint.get('loss', float('inf')), 
                 'config': loaded_model_cfg,
                 'train_config': loaded_train_cfg,
                 'current_global_step': checkpoint.get('current_global_step', 0),
                 'scaler_state_dict': checkpoint.get('scaler_state_dict'),
-                'best_val_loss': checkpoint.get('best_val_loss', float('inf')) # Pass it along
+                'best_val_loss': checkpoint.get('best_val_loss', float('inf'))
             }
             
         except Exception as e:
@@ -445,7 +429,6 @@ class Trainer:
             return None
 
 if __name__ == '__main__':
-    # ... (__main__ test code remains largely the same, can be updated to reflect self.best_val_loss if needed)
     print("--- Testing trainer.py (Illustrative: Full test requires main script context) ---")
     
     class MockDataLoader: 
@@ -453,20 +436,24 @@ if __name__ == '__main__':
         def __len__(self): return self.num_batches
         def __iter__(self): 
             for i in range(self.num_batches):
-                yield torch.randint(0, 256, (4, 16)), torch.randint(0, 256, (4,)) 
+                # Yielding dummy targets that match expected output of model for CrossEntropyLoss
+                yield torch.randint(0, 256, (4, 16), dtype=torch.long), torch.randint(0, 256, (4,), dtype=torch.long)
+
+
+    dummy_trainer_config_main = CONFIG_V3.copy() # To ensure it's defined for finally block
 
     try:
         print("Setting up minimal components for Trainer instantiation test...")
         device = torch.device("cpu") 
         
         dummy_model_config = CONFIG_V3.copy()
-        dummy_model_config["embedding_dim"] = 16 # Minimal
-        # ... (rest of dummy_model_config)
+        dummy_model_config["embedding_dim"] = 16 
         dummy_model_config["attention_d_model"] = 16
         dummy_model_config["num_attention_layers"] = 1
         dummy_model_config["attention_num_heads"] = 1
         dummy_model_config["use_cnn_frontend"] = False
         dummy_model_config["sequence_length"] = 16 
+        dummy_model_config["vocab_size"] = 256 # Ensure vocab_size is set
 
 
         dummy_model_instance = ByteLLM_GrugV3(dummy_model_config).to(device)
@@ -474,59 +461,71 @@ if __name__ == '__main__':
         dummy_criterion = torch.nn.CrossEntropyLoss()
         
         mock_train_dl = MockDataLoader(num_batches=20)
-        mock_val_dl = MockDataLoader(num_batches=5) # Ensure val_dataloader has some data
+        mock_val_dl = MockDataLoader(num_batches=5) 
 
-        dummy_trainer_config = CONFIG_V3.copy() 
-        dummy_trainer_config["num_epochs"] = 1 
-        dummy_trainer_config["print_every"] = 5
-        dummy_trainer_config["use_amp"] = False 
-        dummy_trainer_config["checkpoint_dir"] = "./temp_test_checkpoints_trainer"
-        dummy_trainer_config["model_name"] = "test_grug_trainer_best_loss"
-        dummy_trainer_config["use_lr_warmup"] = False 
-        dummy_trainer_config["test_every_batches"] = 0 
-        dummy_trainer_config["validate_every_batches"] = 3 # Trigger interim validation
-        dummy_trainer_config["checkpoint_every_batches"] = 0 # Disable batch checkpoints for this test clarity
+        dummy_trainer_config_main = CONFIG_V3.copy() 
+        dummy_trainer_config_main["num_epochs"] = 1 
+        dummy_trainer_config_main["print_every"] = 5
+        dummy_trainer_config_main["use_amp"] = False 
+        dummy_trainer_config_main["checkpoint_dir"] = "./temp_test_checkpoints_trainer"
+        dummy_trainer_config_main["model_name"] = "test_grug_trainer_combined"
+        dummy_trainer_config_main["use_lr_warmup"] = False 
+        dummy_trainer_config_main["test_every_batches"] = 0 
+        dummy_trainer_config_main["validate_every_batches"] = 3 
+        # "checkpoint_every_batches" is no longer used for non-best batch saves.
 
-        ensure_dir(dummy_trainer_config["checkpoint_dir"])
+        ensure_dir(dummy_trainer_config_main["checkpoint_dir"])
 
         trainer_instance = Trainer(
             model=dummy_model_instance,
             train_dataloader=mock_train_dl,
-            val_dataloader=mock_val_dl, # Crucial: provide the val_dataloader
+            val_dataloader=mock_val_dl, 
             optimizer=dummy_optimizer,
             criterion=dummy_criterion,
             device=device,
-            checkpoint_dir=dummy_trainer_config["checkpoint_dir"],
-            model_name=dummy_trainer_config["model_name"],
+            checkpoint_dir=dummy_trainer_config_main["checkpoint_dir"],
+            model_name=dummy_trainer_config_main["model_name"],
             scheduler=None,
-            train_config=dummy_trainer_config
+            train_config=dummy_trainer_config_main
         )
         print(f"Trainer instance created. Initial best_val_loss: {trainer_instance.best_val_loss}")
 
-        print("Illustrative: calling train_epoch to test interim validation and best loss update...")
-        # In a real scenario, evaluate_epoch would return different losses
-        # We'll mock it slightly for testing this specific logic by overriding evaluate_epoch temporarily
+        print("Illustrative: calling train_epoch to test combined validation and best loss update...")
         original_evaluate_epoch = trainer_instance.evaluate_epoch
         
-        mock_losses = [0.8, 0.7, 0.6, 0.5, 0.4] # Simulate decreasing losses
-        def mock_evaluate_epoch(epoch_num, profiler_context=None):
-            loss_to_return = mock_losses.pop(0) if mock_losses else 0.9 # Default if we run out
+        mock_losses = [0.8, 0.7, 0.6, 0.5, 0.4, 0.3] 
+        def mock_evaluate_epoch_fn(epoch_num, profiler_context=None):
+            loss_to_return = mock_losses.pop(0) if mock_losses else 0.9 
             print(f"[Mocked evaluate_epoch] Returning loss: {loss_to_return}")
-            return loss_to_return
+            # Call the original method's structure but return a mocked value
+            trainer_instance.model.eval() # Ensure model is in eval mode for this mock
+            # inputs, targets = next(iter(trainer_instance.val_dataloader)) # Simulate getting data
+            # inputs, targets = inputs.to(device), targets.to(device)
+            # with torch.no_grad():
+            #     with autocast(device_type=device.type, enabled=trainer_instance.use_amp):
+            #         outputs = trainer_instance.model(inputs)
+            #         # loss = trainer_instance.criterion(outputs, targets) # Don't actually compute
+            return loss_to_return 
         
-        trainer_instance.evaluate_epoch = mock_evaluate_epoch
+        trainer_instance.evaluate_epoch = mock_evaluate_epoch_fn
         
         trainer_instance.train_epoch(epoch_num=0) 
 
-        trainer_instance.evaluate_epoch = original_evaluate_epoch # Restore original
+        trainer_instance.evaluate_epoch = original_evaluate_epoch
 
         print(f"After train_epoch, best_val_loss: {trainer_instance.best_val_loss}")
-        # Check if a _best.pth model was saved
-        best_model_path = Path(dummy_trainer_config["checkpoint_dir"]) / f"{dummy_trainer_config['model_name']}_best.pth"
+        best_model_path = Path(dummy_trainer_config_main["checkpoint_dir"]) / f"{dummy_trainer_config_main['model_name']}_best.pth"
         if best_model_path.exists():
             print(f"Best model saved at: {best_model_path}")
+            # Verify that no other batch-specific (non-best) checkpoints were made by the combined logic
+            other_batch_checkpoints = list(Path(dummy_trainer_config_main["checkpoint_dir"]).glob(f"{dummy_trainer_config_main['model_name']}_epoch_*_batch_*.pth"))
+            if not other_batch_checkpoints:
+                print("Correctly, no non-best batch-specific checkpoints were found from the combined logic.")
+            else:
+                print(f"ERROR: Found unexpected non-best batch checkpoints: {other_batch_checkpoints}")
+
         else:
-            print(f"Best model was NOT saved at: {best_model_path} (This might be okay if losses didn't improve).")
+            print(f"Best model was NOT saved at: {best_model_path} (This might be okay if losses didn't improve as expected by mock).")
 
 
         print("\n--- Basic Trainer instantiation and illustrative train_epoch call finished ---")
@@ -535,10 +534,11 @@ if __name__ == '__main__':
         print(f"Error during illustrative Trainer test: {e}")
         traceback.print_exc()
     finally:
-        temp_ckpt_dir = Path(dummy_trainer_config.get("checkpoint_dir", "./temp_test_checkpoints_trainer"))
-        if temp_ckpt_dir.exists():
+        temp_ckpt_dir_main = Path(dummy_trainer_config_main.get("checkpoint_dir", "./temp_test_checkpoints_trainer"))
+        if temp_ckpt_dir_main.exists():
             try:
-                for item in temp_ckpt_dir.glob('*'): item.unlink(missing_ok=True) # missing_ok for Python 3.8+
-                temp_ckpt_dir.rmdir()
-                print(f"Cleaned up {temp_ckpt_dir}")
-            except Exception as e_clean: print(f"Error cleaning up {temp_ckpt_dir}: {e_clean}")
+                for item in temp_ckpt_dir_main.glob('*'): 
+                    if item.is_file(): item.unlink()
+                temp_ckpt_dir_main.rmdir()
+                print(f"Cleaned up {temp_ckpt_dir_main}")
+            except Exception as e_clean: print(f"Error cleaning up {temp_ckpt_dir_main}: {e_clean}")

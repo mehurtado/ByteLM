@@ -14,7 +14,7 @@ CONFIG_V3 = {
     "val_split_ratio": 0.1,
     "num_workers": 8,
     "generate_dummy_data_if_empty": True,
-    "force_reprocess_data": True,
+    "force_reprocess_data": False,
 
     # Embedding Layer
     "embedding_dim": 512,
@@ -60,9 +60,8 @@ CONFIG_V3 = {
     "clip_grad_norm_value": 1.0,
     "print_every": 1000,
     "test_every_batches": 5000,
-    "checkpoint_every_batches": 0, # Save checkpoint every N batches. 0 or -1 to disable.
-    "validate_every_batches": 0, # Run validation every N batches. 0 or -1 to disable, runs at epoch end only.
-    "reset_best_val_loss_on_resume": True,
+    "validate_and_checkpoint_best_every_batches": 50000, # Run validation every N batches. 0 or -1 to disable, runs at epoch end only.
+    "reset_best_val_loss_on_resume": False,
 
     # Learning Rate Warmup
     "use_lr_warmup": True,
