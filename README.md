@@ -51,4 +51,4 @@ Contributions welcome via issues or pull requests.
 - Jules
 
 ## License
-MIT License. See `LICENSE.md`.
+MIT License. See `LICENSE`.
