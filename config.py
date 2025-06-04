@@ -14,14 +14,14 @@ CONFIG_V3 = {
     "val_split_ratio": 0.1,
     "num_workers": 8,
     "generate_dummy_data_if_empty": True,
-    "force_reprocess_data": False,
+    "force_reprocess_data": True,
 
     # Embedding Layer
     "embedding_dim": 512,
 
     # CNN Frontend (Optional)
     "use_cnn_frontend": True,
-    "cnn_out_channels_list": [512, 512],
+    "cnn_out_channels_list": [1024, 1024],
     "cnn_kernel_sizes": [9, 3],
     "cnn_stride": 1,
     "cnn_padding_mode": "zeros",
@@ -34,8 +34,8 @@ CONFIG_V3 = {
     "pe_dropout": 0.3,
 
     # Transformer Encoder Block Parameters
-    "attention_d_model": 512,
-    "attention_num_heads": 8,
+    "attention_d_model": 1024,
+    "attention_num_heads": 16,
     "attention_dropout": 0.1, # Dropout within MultiHeadAttention
     "num_attention_layers": 4,
     "ffn_dim_multiply": 4,
@@ -55,17 +55,17 @@ CONFIG_V3 = {
     "scheduler_type": "ReduceLROnPlateau",
     "lr_scheduler_T_max": 50 * 1000, # Placeholder, might be recalculated in main
     "lr_scheduler_eta_min": 1e-6,
-    "lr_scheduler_patience": 10, # For ReduceLROnPlateau
+    "lr_scheduler_patience": 2, # For ReduceLROnPlateau
     "lr_scheduler_factor": 0.1,  # For ReduceLROnPlateau
     "clip_grad_norm_value": 1.0,
     "print_every": 1000,
     "test_every_batches": 5000,
-    "validate_and_checkpoint_best_every_batches": 50000, # Run validation every N batches. 0 or -1 to disable, runs at epoch end only.
+    "validate_and_checkpoint_best_every_batches": 20000, # Run validation every N batches. 0 or -1 to disable, runs at epoch end only.
     "reset_best_val_loss_on_resume": False,
 
     # Learning Rate Warmup
     "use_lr_warmup": True,
-    "lr_warmup_steps": 2000,
+    "lr_warmup_steps": 20000,
     "lr_warmup_init_factor": 0.01,
 
     # Automatic Mixed Precision (AMP)
