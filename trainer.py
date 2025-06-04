@@ -6,6 +6,8 @@ import torch.profiler
 from torch.amp import GradScaler, autocast
 from pathlib import Path
 import traceback # For detailed error logging in checkpoint loading
+import numpy as np
+from torch.utils.data import DataLoader, Subset, Dataset
 
 # Assuming other modules are in the same directory or accessible in Python path
 from model import ByteLLM_GrugV3
@@ -216,9 +218,54 @@ class Trainer:
 
         if not self.val_dataloader:
             # print(f"Epoch {epoch_num+1}: Validation dataloader is not available. Skipping validation.") # Logging handled by caller
-            return float('inf') 
+            return float('inf')
 
-        num_val_batches = len(self.val_dataloader)
+        # Sampling logic starts here
+        eval_dataloader = self.val_dataloader
+        try:
+            # Ensure self.val_dataloader.dataset exists and is a Dataset instance itself or wraps one
+            # Common case: val_dataloader.dataset is already the Dataset
+            # Less common: val_dataloader.dataset is a Subset, then .dataset is the original Dataset
+            # Safest check:
+            current_dataset_obj = self.val_dataloader.dataset
+            original_val_dataset = None
+            if isinstance(current_dataset_obj, Dataset): # Covers direct Dataset and Subset (Subset is a Dataset)
+                 # If it's a Subset, current_dataset_obj.dataset gives the underlying Dataset
+                 # If it's already the main Dataset, this might be an issue if it doesn't have a .dataset attr
+                 # Let's assume if it's a Subset, we want the original one it was created from.
+                 if hasattr(current_dataset_obj, 'dataset') and isinstance(current_dataset_obj.dataset, Dataset):
+                      original_val_dataset = current_dataset_obj.dataset # This gets the original dataset from a Subset
+                 else: # It's likely the direct Dataset instance
+                      original_val_dataset = current_dataset_obj
+
+            if original_val_dataset is None or not isinstance(original_val_dataset, Dataset):
+                print(f"Warning: Could not access a valid original Dataset for sampling in evaluate_epoch. Using full val_dataloader.")
+            else:
+                num_total_val_samples = len(original_val_dataset)
+                num_samples_to_use = self.train_config.get("val_samples_to_use", 100000) # Get from config or default
+
+                if num_total_val_samples > num_samples_to_use:
+                    selected_indices = np.random.choice(num_total_val_samples, num_samples_to_use, replace=False)
+                else:
+                    selected_indices = np.arange(num_total_val_samples)
+
+                sampled_val_subset = Subset(original_val_dataset, selected_indices.tolist())
+
+                eval_dataloader = DataLoader(
+                    sampled_val_subset,
+                    batch_size=self.val_dataloader.batch_size,
+                    num_workers=self.val_dataloader.num_workers,
+                    pin_memory=self.val_dataloader.pin_memory,
+                    shuffle=False # Usually False for validation
+                )
+                print(f"Using a sampled validation set of {len(sampled_val_subset)} samples out of {num_total_val_samples} for evaluation.")
+        except AttributeError as e:
+            print(f"Warning: Error during validation set sampling (AttributeError: {e}). Defaulting to full validation set. Check Dataloader and Dataset structure.")
+        except Exception as e: # Catch any other unexpected error during sampling
+            print(f"Warning: An unexpected error occurred during validation set sampling: {e}. Defaulting to full validation set.")
+
+
+        num_val_batches = len(eval_dataloader)
         if num_val_batches == 0:
             # print(f"Epoch {epoch_num+1}: Validation dataloader is empty. Skipping validation.") # Logging handled by caller
             return float('inf')
@@ -228,7 +275,7 @@ class Trainer:
             active_profiler_steps = min(self.train_config.get("profiler_schedule_active", 5), num_val_batches)
 
         with torch.no_grad():
-            for batch_idx_eval, (inputs, targets) in enumerate(self.val_dataloader):
+            for batch_idx_eval, (inputs, targets) in enumerate(eval_dataloader): # Use eval_dataloader
                 inputs, targets = inputs.to(self.device, non_blocking=True), targets.to(self.device, non_blocking=True)
                 with autocast(device_type=self.device.type, enabled=self.use_amp): 
                     outputs = self.model(inputs)
