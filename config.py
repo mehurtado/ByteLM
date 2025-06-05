@@ -7,8 +7,8 @@ CONFIG_V3 = {
     "processed_data_dir": "./dataset/USE_processed",
     "checkpoint_dir": "./checkpoints_grug_v3",
     "model_name": "grug_v3_cnn_attention",
-    "resume_from_checkpoint": "./checkpoints_grug_v3/grug_v3_cnn_attention_best.pth",
-    "sequence_length": 128,
+    "resume_from_checkpoint": None, # "./checkpoints_grug_v3/grug_v3_cnn_attention_best.pth",
+    "sequence_length": 32,
     "batch_size": 8,
     "vocab_size": 256,
     "val_split_ratio": 0.1,
@@ -55,7 +55,7 @@ CONFIG_V3 = {
     "scheduler_type": "ReduceLROnPlateau",
     "lr_scheduler_T_max": 50 * 1000, # Placeholder, might be recalculated in main
     "lr_scheduler_eta_min": 1e-6,
-    "lr_scheduler_patience": 2, # For ReduceLROnPlateau
+    "lr_scheduler_patience": 10, # For ReduceLROnPlateau
     "lr_scheduler_factor": 0.1,  # For ReduceLROnPlateau
     "clip_grad_norm_value": 1.0,
     "print_every": 1000,
