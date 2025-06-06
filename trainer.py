@@ -135,11 +135,11 @@ class Trainer:
         seed_bytes = seed_text.encode('utf-8')
         print(f"Seed: '{seed_text}'")
         
-        generated_bytes = interim_predictor.generate_sequence(seed_bytes, length=512) 
+        generated_bytes = interim_predictor.generate_sequence(seed_bytes, length=2048) 
         
         try:
             generated_text = generated_bytes.decode('utf-8', errors='replace')
-            print(f"Generated (512 bytes): \"{generated_text}\"")
+            print(f"Generated (2048 bytes): \"{generated_text}\"")
             with open("grug_outputs.txt", "a") as f:
                 f.write(f"\n--- Sample @ Step {self.current_global_step} ---\n")
                 f.write(f"Seed: '{seed_text}'\n")

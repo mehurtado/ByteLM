@@ -14,7 +14,7 @@ CONFIG_V3 = {
     "val_split_ratio": 0.1,
     "num_workers": 8,
     "generate_dummy_data_if_empty": True,
-    "force_reprocess_data": False,
+    "force_reprocess_data": True,
 
     # Embedding Layer
     "embedding_dim": 512,
@@ -46,7 +46,7 @@ CONFIG_V3 = {
 
     # Training Parameters
     "num_epochs": 50,
-    "learning_rate": 3e-6,
+    "learning_rate": 1e-6,
     "optimizer_type": "AdamW",
     "adam_beta1": 0.9,
     "adam_beta2": 0.98,
@@ -55,7 +55,7 @@ CONFIG_V3 = {
     "scheduler_type": "ReduceLROnPlateau",
     "lr_scheduler_T_max": 50 * 1000, # Placeholder, might be recalculated in main
     "lr_scheduler_eta_min": 1e-6,
-    "lr_scheduler_patience": 10, # For ReduceLROnPlateau
+    "lr_scheduler_patience": 5, # For ReduceLROnPlateau
     "lr_scheduler_factor": 0.1,  # For ReduceLROnPlateau
     "clip_grad_norm_value": 1.0,
     "print_every": 1000,
