@@ -12,7 +12,7 @@ CONFIG_V3 = {
     "batch_size": 8,
     "vocab_size": 256,
     "val_split_ratio": 0.1,
-    "num_workers": 8,
+    "num_workers": 0,
     "generate_dummy_data_if_empty": True,
     "force_reprocess_data": True,
 
@@ -36,10 +36,10 @@ CONFIG_V3 = {
     # Transformer Encoder Block Parameters
     "attention_d_model": 1024,
     "attention_num_heads": 16,
-    "attention_dropout": 0.1, # Dropout within MultiHeadAttention
+    "attention_dropout": 0.2, # Dropout within MultiHeadAttention
     "num_attention_layers": 4,
     "ffn_dim_multiply": 4,
-    "transformer_dropout": 0.1, # Dropout for FFN and after MHA in TransformerEncoderLayer
+    "transformer_dropout": 0.2, # Dropout for FFN and after MHA in TransformerEncoderLayer
 
     # Output Layer
     "output_dropout": 0.2,
@@ -74,7 +74,7 @@ CONFIG_V3 = {
     # Generation / Prediction Settings
     "generation_temperature": 1.0,
     "generation_top_k": 50,
-    "interim_test_temperature": 0.2,
+    "interim_test_temperature": 0.3,
     "interim_test_top_k": 20,
 
     # Profiling Settings
