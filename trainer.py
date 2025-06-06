@@ -25,7 +25,7 @@ class Trainer:
                  optimizer: torch.optim.Optimizer,
                  criterion: torch.nn.Module,
                  device: torch.device,
-                 checkpoint_dir: str or Path,
+                 checkpoint_dir: str | Path,
                  model_name: str,
                  scheduler: torch.optim.lr_scheduler._LRScheduler | None = None,
                  train_config: dict = None):
@@ -135,11 +135,11 @@ class Trainer:
         seed_bytes = seed_text.encode('utf-8')
         print(f"Seed: '{seed_text}'")
         
-        generated_bytes = interim_predictor.generate_sequence(seed_bytes, length=128) 
+        generated_bytes = interim_predictor.generate_sequence(seed_bytes, length=512) 
         
         try:
             generated_text = generated_bytes.decode('utf-8', errors='replace')
-            print(f"Generated (128 bytes): \"{generated_text}\"")
+            print(f"Generated (512 bytes): \"{generated_text}\"")
             with open("grug_outputs.txt", "a") as f:
                 f.write(f"\n--- Sample @ Step {self.current_global_step} ---\n")
                 f.write(f"Seed: '{seed_text}'\n")
@@ -455,6 +455,12 @@ class Trainer:
                 try:
                     self.optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
                     print("Optimizer state loaded.")
+
+                    new_lr = self.train_config.get("learning_rate")
+                    if new_lr is not None:
+                        print(f"Overriding optimizer LR with new value from config: {new_lr}")
+                        for param_group in self.optimizer.param_groups:
+                            param_group['lr'] = new_lr
                 except ValueError as e: 
                     print(f"Warning: Could not load optimizer state, possibly due to model structure changes: {e}")
             
@@ -462,6 +468,25 @@ class Trainer:
                 try:
                     self.scheduler.load_state_dict(checkpoint['scheduler_state_dict'])
                     print("Scheduler state loaded.")
+
+                    fresh_scheduler = self.train_config.get("scheduler_type", "ReduceLROnPlateau")
+                    if fresh_scheduler is not None:
+                        print(f"Overriding scheduler type with new value from config: {fresh_scheduler}")
+                        if isinstance(fresh_scheduler, optim.lr_scheduler.ReduceLROnPlateau):
+                            self.scheduler = optim.lr_scheduler.ReduceLROnPlateau(
+                                self.optimizer, 
+                                mode='min', 
+                                factor=self.train_config.get("lr_scheduler_factor", 0.1),
+                                patience=self.train_config.get("lr_scheduler_patience", 10),
+                                min_lr=self.train_config.get("lr_scheduler_eta_min", 1e-6)
+                            )
+                        else:
+                            self.scheduler = optim.lr_scheduler.StepLR(
+                                self.optimizer, 
+                                step_size=self.train_config.get("lr_scheduler_T_max", 1000), 
+                                gamma=1.0
+                            )
+
                 except Exception as e: 
                     print(f"Warning: Could not load scheduler state: {e}")
             

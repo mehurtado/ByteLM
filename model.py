@@ -4,10 +4,8 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-# Assuming model_components.py is in the same directory or accessible in Python path
 from model_components import SinusoidalPositionalEncoding, LearnablePositionalEncoding, CNNFrontend
-# Assuming config.py is in the same directory or accessible
-from config import CONFIG_V3 # Used for default values in __main__ test
+from config import CONFIG_V3
 
 class ByteLLM_GrugV3(nn.Module):
     """

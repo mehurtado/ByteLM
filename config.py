@@ -7,14 +7,14 @@ CONFIG_V3 = {
     "processed_data_dir": "./dataset/USE_processed",
     "checkpoint_dir": "./checkpoints_grug_v3",
     "model_name": "grug_v3_cnn_attention",
-    "resume_from_checkpoint": None, # "./checkpoints_grug_v3/grug_v3_cnn_attention_best.pth",
-    "sequence_length": 32,
+    "resume_from_checkpoint": "./checkpoints_grug_v3/grug_v3_cnn_attention_best.pth",
+    "sequence_length": 256,
     "batch_size": 8,
     "vocab_size": 256,
     "val_split_ratio": 0.1,
     "num_workers": 8,
     "generate_dummy_data_if_empty": True,
-    "force_reprocess_data": True,
+    "force_reprocess_data": False,
 
     # Embedding Layer
     "embedding_dim": 512,
@@ -46,7 +46,7 @@ CONFIG_V3 = {
 
     # Training Parameters
     "num_epochs": 50,
-    "learning_rate": 3e-5,
+    "learning_rate": 3e-6,
     "optimizer_type": "AdamW",
     "adam_beta1": 0.9,
     "adam_beta2": 0.98,
@@ -74,7 +74,7 @@ CONFIG_V3 = {
     # Generation / Prediction Settings
     "generation_temperature": 1.0,
     "generation_top_k": 50,
-    "interim_test_temperature": 0.6,
+    "interim_test_temperature": 0.2,
     "interim_test_top_k": 20,
 
     # Profiling Settings

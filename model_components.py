@@ -1,6 +1,6 @@
 import torch
 import torch.nn as nn
-import torch.nn.functional as F # Required for F.gelu if used in CNNFrontend
+import torch.nn.functional as F # Required for F.gelu
 import math # Required for SinusoidalPositionalEncoding
 
 class SinusoidalPositionalEncoding(nn.Module):
