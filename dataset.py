@@ -17,7 +17,7 @@ class ByteSequenceDataset(Dataset):
     """
     A PyTorch Dataset for serving sequences of bytes from chunked data.
     """
-    def __init__(self, chunk_manifest: list[dict], processed_data_dir: Path, sequence_length: int):
+    def __init__(self, chunk_manifest: list[dict], processed_data_dir: Path, sequence_length: int, stride: int):
         """
         Initializes the dataset with chunked data.
 
@@ -26,6 +26,7 @@ class ByteSequenceDataset(Dataset):
                                          metadata for a chunk (e.g., 'chunk_file', 'num_bytes').
             processed_data_dir (Path): The directory where chunk .npy files are stored.
             sequence_length (int): The length of the input sequences to be generated.
+            stride (int): The step size between the start of consecutive sequences.
         """
         if not isinstance(chunk_manifest, list):
             raise TypeError(f"chunk_manifest must be a list, got {type(chunk_manifest)}")
@@ -33,10 +34,13 @@ class ByteSequenceDataset(Dataset):
             raise TypeError(f"processed_data_dir must be a Path object, got {type(processed_data_dir)}")
         if not isinstance(sequence_length, int) or sequence_length <= 0:
             raise ValueError(f"sequence_length must be a positive integer, got {sequence_length}")
+        if not isinstance(stride, int) or stride <= 0:
+            raise ValueError(f"stride must be a positive integer, got {stride}")
 
         self.chunk_manifest = chunk_manifest
         self.processed_data_dir = processed_data_dir
         self.sequence_length = sequence_length
+        self.stride = stride
         self.cumulative_sequences: list[int] = []
         self.total_num_sequences = 0
 
@@ -49,7 +53,12 @@ class ByteSequenceDataset(Dataset):
             if 'num_bytes' not in chunk_info:
                 raise ValueError(f"Chunk info {chunk_info.get('chunk_file', 'Unknown chunk')} is missing 'num_bytes'.")
 
-            num_sequences_in_chunk = max(0, chunk_info['num_bytes'] - self.sequence_length)
+            num_bytes_in_chunk = chunk_info['num_bytes']
+            if num_bytes_in_chunk >= self.sequence_length:
+                num_sequences_in_chunk = (num_bytes_in_chunk - self.sequence_length) // self.stride + 1
+            else:
+                num_sequences_in_chunk = 0
+
             chunk_info['num_sequences'] = num_sequences_in_chunk
             current_cumulative_sum += num_sequences_in_chunk
             self.cumulative_sequences.append(current_cumulative_sum)
@@ -106,8 +115,29 @@ class ByteSequenceDataset(Dataset):
                 f"Cumulative sequences: {self.cumulative_sequences}"
              )
 
-        input_sequence_np = current_chunk_data[local_idx : local_idx + self.sequence_length].copy()
-        target_np = current_chunk_data[local_idx + self.sequence_length].copy()
+        start_pos = local_idx * self.stride
+        end_pos = start_pos + self.sequence_length
+        target_pos = end_pos # Target is the byte immediately following the input sequence
+
+        # Boundary check for target_pos
+        if target_pos >= chunk_info['num_bytes']:
+            # This should ideally not happen if num_sequences_in_chunk is calculated correctly
+            # and local_idx is within bounds. But as a safeguard:
+            raise IndexError(
+                f"Calculated target_pos {target_pos} is out of bounds for chunk {chunk_filename} "
+                f"(num_bytes: {chunk_info['num_bytes']}) with local_idx {local_idx}, stride {self.stride}, seq_len {self.sequence_length}."
+            )
+
+        input_sequence_np = current_chunk_data[start_pos : end_pos].copy()
+        # The target is the single byte at target_pos, which is end_pos
+        # However, the original code implies the target is the byte *after* the sequence.
+        # If stride can be > 1,  local_idx + self.sequence_length might not be the correct target
+        # if we are skipping bytes.
+        # The new logic: target is simply the byte at `start_pos + self.sequence_length` (which is `end_pos`)
+        # Let's stick to the original intention: target is the byte immediately following the sequence,
+        # so current_chunk_data[end_pos] or current_chunk_data[start_pos + self.sequence_length]
+        target_np = current_chunk_data[target_pos].copy()
+
 
         input_tensor = torch.tensor(input_sequence_np, dtype=torch.long)
         target_tensor = torch.tensor(target_np, dtype=torch.long)
@@ -249,14 +279,15 @@ class DataProcessor:
         return chunk_metadata_list
 
     def get_dataloaders(self, batch_size: int, val_split_ratio: float,
-                        num_workers: int, current_sequence_length: int) -> tuple[DataLoader, DataLoader | None]:
+                        num_workers: int, current_sequence_length: int, stride: int) -> tuple[DataLoader, DataLoader | None]:
         chunk_manifest_data = self.load_or_create_chunk_manifest()
         if not chunk_manifest_data:
             raise ValueError("No data chunks found or created. Cannot create dataloaders.")
         full_dataset = ByteSequenceDataset(
             chunk_manifest=chunk_manifest_data,
             processed_data_dir=self.processed_data_dir,
-            sequence_length=current_sequence_length
+            sequence_length=current_sequence_length,
+            stride=stride
         )
         num_total_sequences = len(full_dataset)
         if num_total_sequences == 0:

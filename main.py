@@ -23,7 +23,7 @@ def setup_environment(config_dict: dict) -> torch.device:
     ensure_dir(config_dict["data_dir"])
     ensure_dir(config_dict["checkpoint_dir"])
     ensure_dir(config_dict["processed_data_dir"])
-    
+
     if config_dict.get("profiler_log_dir") and config_dict.get("enable_profiler", False):
         ensure_dir(config_dict["profiler_log_dir"])
         ensure_dir(Path(config_dict["profiler_log_dir"]) / "train")
@@ -32,7 +32,7 @@ def setup_environment(config_dict: dict) -> torch.device:
     if config_dict.get("generate_dummy_data_if_empty", True):
         # Pass the relevant part of the config if generate_dummy_data needs it
         generate_dummy_data(config_dict["data_dir"], config_dict)
-    
+
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     print(f"Device: {device}")
     if device.type == 'cuda':
@@ -52,7 +52,8 @@ def load_data_components(config_dict: dict) -> tuple[torch.utils.data.DataLoader
     Updates config_dict in place if vocab_size changes.
     """
     current_seq_len = config_dict["sequence_length"]
-    print(f"Initializing DataProcessor with sequence_length: {current_seq_len}")
+    stride = config_dict.get("data_stride", current_seq_len) # Default to sequence_length if not present
+    print(f"Initializing DataProcessor with sequence_length: {current_seq_len} and stride: {stride}")
 
     data_processor = DataProcessor(
         data_dir=config_dict["data_dir"],
@@ -61,13 +62,14 @@ def load_data_components(config_dict: dict) -> tuple[torch.utils.data.DataLoader
         force_reprocess=config_dict.get("force_reprocess_data", False),
         config_for_data_gen=config_dict # Pass the whole config for dummy data generation logic
     )
-    
+
     # Get DataLoaders using the current_sequence_length from config for this run
     train_dataloader, val_dataloader = data_processor.get_dataloaders(
         batch_size=config_dict["batch_size"],
         val_split_ratio=config_dict["val_split_ratio"],
         num_workers=config_dict.get("num_workers", 0),
-        current_sequence_length=current_seq_len # Explicitly pass sequence length for dataloader creation
+        current_sequence_length=current_seq_len, # Explicitly pass sequence length for dataloader creation
+        stride=stride # Pass the stride
     )
 
     vocab_size = data_processor.get_vocab_size() # Should be 256 for bytes
@@ -75,14 +77,14 @@ def load_data_components(config_dict: dict) -> tuple[torch.utils.data.DataLoader
         print(f"Warning: CONFIG_V3 vocab_size {config_dict.get('vocab_size')} differs from DataProcessor's {vocab_size}. "
               f"Using DataProcessor's ({vocab_size}).")
         config_dict["vocab_size"] = vocab_size # Update config in place
-        
+
     return train_dataloader, val_dataloader
 
 def initialize_optimizer(model: nn.Module, optim_config: dict) -> torch.optim.Optimizer:
     """Initializes the optimizer based on configuration."""
     lr = optim_config.get("learning_rate", 1e-3)
     optimizer_type = optim_config.get("optimizer_type", "AdamW").lower()
-    
+
     # Filter parameters that require gradients
     trainable_params = filter(lambda p: p.requires_grad, model.parameters())
 
@@ -105,7 +107,7 @@ def initialize_optimizer(model: nn.Module, optim_config: dict) -> torch.optim.Op
     print(f"Optimizer initialized: {optimizer_type} with LR: {lr}")
     return optimizer
 
-def initialize_scheduler(optimizer: torch.optim.Optimizer, scheduler_config: dict, 
+def initialize_scheduler(optimizer: torch.optim.Optimizer, scheduler_config: dict,
                          batches_per_epoch: int = None) -> torch.optim.lr_scheduler._LRScheduler | None:
     """Initializes the learning rate scheduler based on configuration."""
     scheduler_type = scheduler_config.get("scheduler_type")
@@ -126,7 +128,7 @@ def initialize_scheduler(optimizer: torch.optim.Optimizer, scheduler_config: dic
     elif scheduler_type == "cosineannealinglr":
         # T_max can be directly set, or calculated if batches_per_epoch is known
         T_max_direct = scheduler_config.get("lr_scheduler_T_max") # Explicit T_max in steps
-        
+
         if T_max_direct is not None:
             T_max = int(T_max_direct)
             print(f"Using T_max from config for CosineAnnealingLR: {T_max} steps.")
@@ -155,7 +157,7 @@ def initialize_scheduler(optimizer: torch.optim.Optimizer, scheduler_config: dic
         return None
     return scheduler
 
-def initialize_training_components(model_config_to_use: dict, optim_sched_config_to_use: dict, 
+def initialize_training_components(model_config_to_use: dict, optim_sched_config_to_use: dict,
                                    device: torch.device, batches_per_epoch_for_scheduler: int = None
                                    ) -> tuple[ByteLLM_GrugV3, torch.optim.Optimizer, nn.Module, torch.optim.lr_scheduler._LRScheduler | None]:
     """Initializes model, optimizer, criterion, and scheduler."""
@@ -170,7 +172,7 @@ def initialize_training_components(model_config_to_use: dict, optim_sched_config
         print("Attempting to compile the GrugV3 model with torch.compile()...")
         try:
             # Common modes: "default", "reduce-overhead", "max-autotune"
-            # model = torch.compile(model, mode="reduce-overhead") 
+            # model = torch.compile(model, mode="reduce-overhead")
             model = torch.compile(model) # Default mode
             print("Model compiled successfully with torch.compile().")
         except Exception as e:
@@ -179,15 +181,15 @@ def initialize_training_components(model_config_to_use: dict, optim_sched_config
     optimizer = initialize_optimizer(model, optim_sched_config_to_use)
     scheduler = initialize_scheduler(optimizer, optim_sched_config_to_use, batches_per_epoch_for_scheduler)
     criterion = nn.CrossEntropyLoss() # Standard for classification-like tasks (next byte prediction)
-    
+
     return model, optimizer, criterion, scheduler
 
 # --- Training and Prediction Orchestration Functions ---
 
-def perform_training(current_run_config: dict, model: ByteLLM_GrugV3, 
-                     train_dataloader: torch.utils.data.DataLoader, 
-                     val_dataloader: torch.utils.data.DataLoader | None, 
-                     optimizer: torch.optim.Optimizer, criterion: nn.Module, 
+def perform_training(current_run_config: dict, model: ByteLLM_GrugV3,
+                     train_dataloader: torch.utils.data.DataLoader,
+                     val_dataloader: torch.utils.data.DataLoader | None,
+                     optimizer: torch.optim.Optimizer, criterion: nn.Module,
                      scheduler: torch.optim.lr_scheduler._LRScheduler | None, device: torch.device):
     """Orchestrates the training phase."""
     if not current_run_config.get("DO_TRAINING", True):
@@ -233,12 +235,12 @@ def perform_prediction_scenarios(current_run_config: dict, device: torch.device)
         ckpt = torch.load(best_ckpt_path, map_location=device)
 
         # Crucial: Use the configuration stored *within the checkpoint* to rebuild the model
-        loaded_model_config_from_ckpt = ckpt.get('config') 
+        loaded_model_config_from_ckpt = ckpt.get('config')
         if not loaded_model_config_from_ckpt:
             print("ERROR: Checkpoint does not contain its 'config' (model architecture). Cannot reliably perform prediction.")
             print("Attempting to fall back to current run's config (HIGHLY RISKY if architecture changed).")
             loaded_model_config_from_ckpt = current_run_config.copy() # Risky fallback
-        
+
         # Ensure all necessary keys are present for model init, potentially merging with current if some are missing
         # This merge is a safeguard, ideally checkpoint 'config' is complete
         required_model_keys = {"vocab_size", "embedding_dim", "attention_d_model", "max_positional_encoding_len", "num_attention_layers", "attention_num_heads"}
@@ -294,15 +296,15 @@ def main():
     Main function to orchestrate the GrugV3 model training and prediction.
     """
     # Use a mutable copy of the global config for this run
-    current_run_config = CONFIG_V3.copy() 
-    
+    current_run_config = CONFIG_V3.copy()
+
     # Anomaly detection can be helpful during development, but has a performance overhead.
     # Disable it if profiler is enabled, as they can interact.
     if not current_run_config.get("enable_profiler", False):
         # torch.autograd.set_detect_anomaly(True)
         # print("INFO: PyTorch autograd anomaly detection is ENABLED.")
         pass # Disabled by default now; can be enabled for debugging.
-    
+
     try:
         device = setup_environment(current_run_config)
 
@@ -318,20 +320,20 @@ def main():
 
         print("\n--- GrugV3 Model and Training Components Initialization ---")
         # Ensure use_torch_compile key exists, defaulting to False if not in config
-        if "use_torch_compile" not in current_run_config: 
-            current_run_config["use_torch_compile"] = False 
+        if "use_torch_compile" not in current_run_config:
+            current_run_config["use_torch_compile"] = False
 
         model, optimizer, criterion, scheduler = initialize_training_components(
-            model_config_to_use=current_run_config, 
-            optim_sched_config_to_use=current_run_config, 
+            model_config_to_use=current_run_config,
+            optim_sched_config_to_use=current_run_config,
             device=device,
             batches_per_epoch_for_scheduler=batches_per_epoch
         )
 
         # --- Perform Training ---
-        perform_training(current_run_config, model, train_dataloader, val_dataloader, 
+        perform_training(current_run_config, model, train_dataloader, val_dataloader,
                          optimizer, criterion, scheduler, device)
-        
+
         # --- Perform Prediction (using the best model saved during training) ---
         perform_prediction_scenarios(current_run_config, device)
 

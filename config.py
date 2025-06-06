@@ -15,6 +15,7 @@ CONFIG_V3 = {
     "num_workers": 8,
     "generate_dummy_data_if_empty": True,
     "force_reprocess_data": True,
+    "data_stride": 256,
 
     # Embedding Layer
     "embedding_dim": 512,
