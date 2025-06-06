@@ -15,7 +15,7 @@ CONFIG_V3 = {
     "num_workers": 0,
     "generate_dummy_data_if_empty": True,
     "force_reprocess_data": True,
-    "data_stride": 256,
+    "data_stride": 64,
 
     # Embedding Layer
     "embedding_dim": 512,
@@ -46,7 +46,7 @@ CONFIG_V3 = {
     "output_dropout": 0.2,
 
     # Training Parameters
-    "num_epochs": 50,
+    "num_epochs": 500,
     "learning_rate": 1e-6,
     "optimizer_type": "AdamW",
     "adam_beta1": 0.9,
