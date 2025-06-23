@@ -6,22 +6,25 @@ CONFIG_V3 = {
     "data_dir": "./dataset/USE",
     "processed_data_dir": "./dataset/USE_processed",
     "checkpoint_dir": "./checkpoints_grug_v3",
-    "model_name": "grug_v3_cnn_attention",
-    "resume_from_checkpoint": "./checkpoints_grug_v3/grug_v3_cnn_attention_best.pth",
+    "model_name": "grug_v3_parallel_stream", # New model name
+    "resume_from_checkpoint": "./checkpoints_grug_v3/grug_v3_parallel_stream_best.pth", # Set to a path to resume, e.g., "./checkpoints_grug_v3/grug_v3_parallel_stream_best.pth"
     "sequence_length": 256,
     "batch_size": 8,
     "vocab_size": 256,
     "val_split_ratio": 0.1,
     "num_workers": 0,
     "generate_dummy_data_if_empty": True,
-    "force_reprocess_data": True,
+    "force_reprocess_data": False, # Set to True to force reprocessing on next run
     "data_stride": 64,
 
     # Embedding Layer
     "embedding_dim": 512,
 
-    # CNN Frontend (Optional)
-    "use_cnn_frontend": True,
+    # --- ARCHITECTURE SWITCH ---
+    "use_parallel_stream_model": True, # MASTER SWITCH for the new architecture
+
+    # --- Original CNN Frontend (can be used by either model if desired) ---
+    "use_cnn_frontend": False, # Best to keep this off to avoid confusion with the aggregator
     "cnn_out_channels_list": [1024, 1024],
     "cnn_kernel_sizes": [9, 3],
     "cnn_stride": 1,
@@ -30,68 +33,69 @@ CONFIG_V3 = {
     "cnn_dropout": 0.2,
     "cnn_use_layernorm": True,
 
-    # Learnable Positional Encoding
+    # --- Parallel Stream Settings (used if use_parallel_stream_model is True) ---
+    "num_byte_stream_layers": 4,      # Attention layers for the byte-level path
+    "num_agg_stream_layers": 4,       # Attention layers for the aggregated-byte path
+    "agg_cnn_kernel_size": 4,         # Kernel size for the aggregator CNN
+    "agg_cnn_stride": 4,              # Stride for the aggregator CNN
+    "agg_cnn_out_dim": 1024,          # Output dim of aggregator, should match attention_d_model
+
+    # --- Original Single-Stream Transformer Settings ---
+    # (used if use_parallel_stream_model is False)
+    "num_attention_layers": 4,
+
+    # --- Common Component Settings ---
     "max_positional_encoding_len": 4096,
     "pe_dropout": 0.3,
-
-    # Transformer Encoder Block Parameters
     "attention_d_model": 1024,
     "attention_num_heads": 16,
-    "attention_dropout": 0.2, # Dropout within MultiHeadAttention
-    "num_attention_layers": 4,
+    "attention_dropout": 0.2,
     "ffn_dim_multiply": 4,
-    "transformer_dropout": 0.2, # Dropout for FFN and after MHA in TransformerEncoderLayer
+    "transformer_dropout": 0.2,
+    "transformer_norm_first": False, # Set to True for Pre-LN Transformers
 
-    # Output Layer
+    # --- Output Layer ---
     "output_dropout": 0.2,
 
-    # Training Parameters
+    # --- Training Parameters ---
     "num_epochs": 500,
-    "learning_rate": 1e-6,
+    "learning_rate": 5e-5,
     "optimizer_type": "AdamW",
     "adam_beta1": 0.9,
     "adam_beta2": 0.98,
     "adam_eps": 1e-9,
     "weight_decay": 0.01,
     "scheduler_type": "ReduceLROnPlateau",
-    "lr_scheduler_T_max": 50 * 1000, # Placeholder, might be recalculated in main
+    "lr_scheduler_T_max": 50 * 1000,
     "lr_scheduler_eta_min": 1e-6,
-    "lr_scheduler_patience": 5, # For ReduceLROnPlateau
-    "lr_scheduler_factor": 0.1,  # For ReduceLROnPlateau
+    "lr_scheduler_patience": 5,
+    "lr_scheduler_factor": 0.1,
     "clip_grad_norm_value": 1.0,
     "print_every": 1000,
     "test_every_batches": 5000,
-    "validate_and_checkpoint_best_every_batches": 20000, # Run validation every N batches. 0 or -1 to disable, runs at epoch end only.
+    "validate_and_checkpoint_best_every_batches": 20000,
     "reset_best_val_loss_on_resume": False,
-
-    # Learning Rate Warmup
     "use_lr_warmup": True,
     "lr_warmup_steps": 20000,
     "lr_warmup_init_factor": 0.01,
-
-    # Automatic Mixed Precision (AMP)
     "use_amp": True,
 
-    # Generation / Prediction Settings
+    # --- Generation / Prediction Settings ---
     "generation_temperature": 1.0,
     "generation_top_k": 50,
     "interim_test_temperature": 0.3,
     "interim_test_top_k": 20,
 
-    # Profiling Settings
+    # --- Profiling Settings ---
     "enable_profiler": False,
     "profiler_log_dir": "./profiler_logs_grug_v3",
-    "profile_epoch_target": 0,
-    "profiler_schedule_wait": 5,
-    "profiler_schedule_warmup": 5,
-    "profiler_schedule_active": 10,
-    "profiler_schedule_repeat": 1,
+    # ... (other profiler settings) ...
 
-    # Main script flow control
+    # --- Main script flow control ---
     "DO_TRAINING": True,
     "DO_PREDICTION": True,
 
-    # CuDNN Benchmarking
+    # --- Backend Settings ---
     "cudnn_benchmark": True,
-    "use_torch_compile": False # Flag to enable torch.compile
+    "use_torch_compile": False
 }

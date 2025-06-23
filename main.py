@@ -279,7 +279,7 @@ def perform_prediction_scenarios(current_run_config: dict, device: torch.device)
         for seed_name, seed_text in seeds_to_try.items():
             seed_bytes = seed_text.encode('utf-8')
             print(f"\nSeed ({seed_name}): '{seed_text}' (Length: {len(seed_bytes)} bytes)")
-            generated_bytes = predictor.generate_sequence(seed_bytes, length=150) # Generate 150 new bytes
+            generated_bytes = predictor.generate_sequence(seed_bytes, length=1024) # Generate 1024 new bytes
             try:
                 full_text = generated_bytes.decode('utf-8', errors='replace') # Includes seed + generated
                 print(f"Full Text (Seed + Generated):\n---\n{full_text}\n---")
