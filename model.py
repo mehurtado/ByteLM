@@ -1,10 +1,11 @@
-# model.py (Corrected)
+# model.py (Fully Modified)
 
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-from model_components import SinusoidalPositionalEncoding, CNNFrontend
+# 1. MODIFY THIS IMPORT
+from model_components import SinusoidalPositionalEncoding, CNNFrontend, CustomTransformerEncoderLayer
 from config import CONFIG_V3
 
 class ByteLLM_GrugV3(nn.Module):
@@ -13,6 +14,7 @@ class ByteLLM_GrugV3(nn.Module):
     This class now supports two modes controlled by 'use_parallel_stream_model' in the config:
     1. A standard single-stream Transformer (original architecture).
     2. A parallel-stream model with a byte-level path and a CNN-aggregated path.
+    Both architectures can now use Curved FFNs via CustomTransformerEncoderLayer.
     """
     def __init__(self, model_config: dict):
         super().__init__()
@@ -24,7 +26,7 @@ class ByteLLM_GrugV3(nn.Module):
             self.config["embedding_dim"]
         )
 
-        # Optional CNN Frontend (can be used by either architecture before the main encoders)
+        # Optional CNN Frontend
         if self.config.get("use_cnn_frontend", False):
             self.cnn_frontend = CNNFrontend(
                 in_channels=self.config["embedding_dim"],
@@ -49,11 +51,10 @@ class ByteLLM_GrugV3(nn.Module):
         print(f"ByteLLM_GrugV3 Initialized. Total Parameters: {total_params:,}")
 
     def _init_single_stream(self):
-        """Initializes the original single-stream Transformer architecture."""
+        """Initializes the single-stream Transformer architecture."""
         print("Initializing Single-Stream Architecture.")
         d_model = self.config["attention_d_model"]
 
-        # If embedding_dim is different from d_model, add a projection layer
         if self.config["embedding_dim"] != d_model:
             self.input_projection = nn.Linear(self.config["embedding_dim"], d_model)
         else:
@@ -65,15 +66,18 @@ class ByteLLM_GrugV3(nn.Module):
             max_len=self.config["max_positional_encoding_len"]
         )
 
+        # 2. REPLACE THE TRANSFORMER LAYER INITIALIZATION HERE
         self.transformer_encoder_layers = nn.ModuleList([
-            nn.TransformerEncoderLayer(
+            CustomTransformerEncoderLayer(
                 d_model=d_model,
                 nhead=self.config["attention_num_heads"],
                 dim_feedforward=d_model * self.config.get("ffn_dim_multiply", 4),
                 dropout=self.config.get("transformer_dropout", 0.1),
                 activation=F.gelu,
                 batch_first=True,
-                norm_first=self.config.get("transformer_norm_first", False)
+                norm_first=self.config.get("transformer_norm_first", False),
+                use_curved_ffn=self.config.get("use_curved_ffn", False),
+                ffn_gamma=self.config.get("ffn_gamma", 0.0)
             ) for _ in range(self.config["num_attention_layers"])
         ])
 
@@ -82,7 +86,7 @@ class ByteLLM_GrugV3(nn.Module):
         self.fc_out = nn.Linear(d_model, self.config["vocab_size"])
 
     def _init_parallel_stream(self):
-        """Initializes the new parallel-stream architecture."""
+        """Initializes the parallel-stream architecture."""
         print("Initializing Parallel-Stream Architecture.")
         embedding_dim = self.config["embedding_dim"]
         d_model = self.config["attention_d_model"]
@@ -94,14 +98,16 @@ class ByteLLM_GrugV3(nn.Module):
         n_heads = self.config["attention_num_heads"]
 
         # --- Path 1: Byte Stream Components ---
-        # Add a projection layer to match embedding_dim to attention_d_model
         self.byte_stream_projection = nn.Linear(embedding_dim, d_model)
-
         self.byte_positional_encoder = SinusoidalPositionalEncoding(d_model, pe_dropout, max_len)
+
+        # 3. REPLACE THE TRANSFORMER LAYER INITIALIZATION HERE
         self.byte_stream_encoder = nn.ModuleList([
-            nn.TransformerEncoderLayer(
+            CustomTransformerEncoderLayer(
                 d_model=d_model, nhead=n_heads, dim_feedforward=d_model * ffn_multiply,
-                dropout=transformer_dropout, activation=F.gelu, batch_first=True, norm_first=norm_first
+                dropout=transformer_dropout, activation=F.gelu, batch_first=True, norm_first=norm_first,
+                use_curved_ffn=self.config.get("use_curved_ffn", False),
+                ffn_gamma=self.config.get("ffn_gamma", 0.0)
             ) for _ in range(self.config["num_byte_stream_layers"])
         ])
 
@@ -115,10 +121,14 @@ class ByteLLM_GrugV3(nn.Module):
         )
         agg_max_len = max_len // self.config["agg_cnn_stride"]
         self.agg_positional_encoder = SinusoidalPositionalEncoding(agg_cnn_out_dim, pe_dropout, agg_max_len)
+
+        # 4. REPLACE THE TRANSFORMER LAYER INITIALIZATION HERE
         self.agg_stream_encoder = nn.ModuleList([
-            nn.TransformerEncoderLayer(
+            CustomTransformerEncoderLayer(
                 d_model=agg_cnn_out_dim, nhead=n_heads, dim_feedforward=agg_cnn_out_dim * ffn_multiply,
-                dropout=transformer_dropout, activation=F.gelu, batch_first=True, norm_first=norm_first
+                dropout=transformer_dropout, activation=F.gelu, batch_first=True, norm_first=norm_first,
+                use_curved_ffn=self.config.get("use_curved_ffn", False),
+                ffn_gamma=self.config.get("ffn_gamma", 0.0)
             ) for _ in range(self.config["num_agg_stream_layers"])
         ])
 
@@ -136,12 +146,12 @@ class ByteLLM_GrugV3(nn.Module):
             return self._forward_single_stream(x)
 
     def _forward_single_stream(self, x: torch.Tensor) -> torch.Tensor:
-        """Forward pass for the original single-stream model."""
+        """Forward pass for the single-stream model."""
         x = self.embedding(x)
         if self.cnn_frontend:
             x = self.cnn_frontend(x)
         
-        x = self.input_projection(x) # Apply projection
+        x = self.input_projection(x)
 
         x = self.positional_encoder(x)
         for layer in self.transformer_encoder_layers:
@@ -153,13 +163,12 @@ class ByteLLM_GrugV3(nn.Module):
         return logits
 
     def _forward_parallel_stream(self, x: torch.Tensor) -> torch.Tensor:
-        """Forward pass for the new parallel-stream model."""
+        """Forward pass for the parallel-stream model."""
         x_embed = self.embedding(x)
         if self.cnn_frontend:
             x_embed = self.cnn_frontend(x_embed)
 
         # --- Path 1: Fine-grained Byte Stream ---
-        # Apply the projection to match dimensions before positional encoding
         byte_path_projected = self.byte_stream_projection(x_embed)
         byte_path_input = self.byte_positional_encoder(byte_path_projected)
         
@@ -188,6 +197,7 @@ class ByteLLM_GrugV3(nn.Module):
         return logits
 
 if __name__ == '__main__':
+    # ... (The __main__ block for testing remains unchanged) ...
     print("--- Testing model.py ---")
     test_config = CONFIG_V3.copy()
     batch_size = 2

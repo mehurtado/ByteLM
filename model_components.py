@@ -361,3 +361,129 @@ if __name__ == '__main__':
         raise
 
     print("\n--- All model_components.py tests completed successfully! ---")
+
+
+class CurvedFeedForward(nn.Module):
+    """
+    A Feed-Forward Network that incorporates curvature by modulating its
+    activation function with a state-dependent effective inverse temperature (beta_prime),
+    inspired by the principles in "Explosive neural networks via higher-order
+    interactions in curved statistical manifolds."
+    """
+    def __init__(self, d_model: int, dim_feedforward: int, dropout: float = 0.1, gamma: float = 0.0):
+        """
+        Initializes the CurvedFeedForward module.
+
+        Args:
+            d_model (int): The input and output dimension.
+            dim_feedforward (int): The inner dimension of the FFN.
+            dropout (float): The dropout probability.
+            gamma (float): The curvature parameter, analogous to γ' in the paper.
+                           Negative values are expected to accelerate dynamics.
+        """
+        super().__init__()
+        self.linear1 = nn.Linear(d_model, dim_feedforward)
+        self.dropout = nn.Dropout(dropout)
+        self.linear2 = nn.Linear(dim_feedforward, d_model)
+        self.gamma = gamma
+
+        if self.gamma > 0:
+            print(f"INFO: CurvedFeedForward initialized with positive gamma ({self.gamma}). This may lead to decelerated dynamics.")
+        elif self.gamma < 0:
+            print(f"INFO: CurvedFeedForward initialized with negative gamma ({self.gamma}). This may lead to accelerated dynamics.")
+
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        """
+        Forward pass for the Curved FFN.
+
+        Args:
+            x (torch.Tensor): The input tensor of shape (batch_size, sequence_length, d_model).
+
+        Returns:
+            torch.Tensor: The output tensor of the same shape.
+        """
+        # First linear transformation
+        x_ff = self.linear1(x)
+
+        # --- Curvature Implementation ---
+        if self.gamma != 0:
+            # The output of the first linear layer serves as an input to the energy function.
+            # Following the paper's logic, where energy E(x) is related to the square of
+            # an order parameter (e.g., magnetization m), we use the squared L2 norm
+            # of the feature vector as an analogue to the energy term.
+            # This corresponds to E(x) in Eq. (16) of the paper.
+            with torch.no_grad():
+                # The energy term is calculated based on the intermediate representation.
+                # Shape: (batch_size, sequence_length, 1)
+                energy = 0.5 * torch.sum(x_ff.pow(2), dim=-1, keepdim=True)
+
+            # Calculate the effective inverse temperature β' according to the logic
+            # derived from Eq. (16): β' = β / (1 + γ' * E(x)). We assume a base β of 1.
+            # Shape: (batch_size, sequence_length, 1)
+            beta_prime = 1.0 / (1.0 + self.gamma * energy)
+
+            # Modulate the intermediate representation by the effective temperature
+            # before the non-linear activation function.
+            x_activated = F.gelu(x_ff * beta_prime)
+        else:
+            # If gamma is 0, this layer behaves as a standard FFN.
+            x_activated = F.gelu(x_ff)
+
+        x_ff = self.dropout(x_activated)
+
+        # Second linear transformation
+        return self.linear2(x_ff)
+
+
+class CustomTransformerEncoderLayer(nn.Module):
+    """
+    A custom Transformer Encoder Layer that can use either a standard FFN or the
+    new CurvedFeedForward module. This is necessary because the standard
+    nn.TransformerEncoderLayer does not allow for replacement of its internal FFN.
+    """
+    def __init__(self, d_model: int, nhead: int, dim_feedforward: int, dropout: float,
+                 activation=F.gelu, layer_norm_eps: float = 1e-5, batch_first: bool = True,
+                 norm_first: bool = False, use_curved_ffn: bool = False, ffn_gamma: float = 0.0):
+        super().__init__()
+        self.self_attn = nn.MultiheadAttention(d_model, nhead, dropout=dropout, batch_first=batch_first)
+
+        # --- FFN Selection ---
+        if use_curved_ffn:
+            self.ffn = CurvedFeedForward(d_model, dim_feedforward, dropout, gamma=ffn_gamma)
+        else:
+            # A standard FFN implementation for comparison and backward compatibility.
+            self.ffn = nn.Sequential(
+                nn.Linear(d_model, dim_feedforward),
+                nn.GELU(),
+                nn.Dropout(dropout),
+                nn.Linear(dim_feedforward, d_model)
+            )
+
+        self.norm1 = nn.LayerNorm(d_model, eps=layer_norm_eps)
+        self.norm2 = nn.LayerNorm(d_model, eps=layer_norm_eps)
+        self.dropout1 = nn.Dropout(dropout)
+        self.dropout2 = nn.Dropout(dropout)
+        self.norm_first = norm_first
+
+    def forward(self, src: torch.Tensor, src_mask = None, src_key_padding_mask = None) -> torch.Tensor:
+        # This forward pass implementation mirrors the one from PyTorch's official
+        # nn.TransformerEncoderLayer to ensure identical behavior.
+        x = src
+        if self.norm_first:
+            # Pre-LN (Layer Normalization) variant
+            attn_output, _ = self.self_attn(self.norm1(x), self.norm1(x), self.norm1(x),
+                                            attn_mask=src_mask, key_padding_mask=src_key_padding_mask,
+                                            need_weights=False)
+            x = x + self.dropout1(attn_output)
+            x = x + self.dropout2(self.ffn(self.norm2(x)))
+        else:
+            # Post-LN variant
+            attn_output, _ = self.self_attn(x, x, x,
+                                            attn_mask=src_mask, key_padding_mask=src_key_padding_mask,
+                                            need_weights=False)
+            x = x + self.dropout1(attn_output)
+            x = self.norm1(x)
+            x = x + self.dropout2(self.ffn(x))
+            x = self.norm2(x)
+        return x
