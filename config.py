@@ -50,6 +50,11 @@ CONFIG_V3 = {
     "attention_d_model": 1024,
     "attention_num_heads": 16,
     "attention_dropout": 0.2,
+
+    # --- FFN Curvature Settings ---
+    "use_curved_ffn": True,           # Enable/disable the curved FFN feature.
+    "ffn_gamma": -1.2,                # The curvature parameter γ'. Negative values accelerate dynamics.
+
     "ffn_dim_multiply": 4,
     "transformer_dropout": 0.2,
     "transformer_norm_first": False, # Set to True for Pre-LN Transformers
